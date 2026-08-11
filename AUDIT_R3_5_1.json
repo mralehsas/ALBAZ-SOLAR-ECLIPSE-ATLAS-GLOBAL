@@ -1,0 +1,90 @@
+{
+  "build": "R3.5.1-GITHUB-FLAT",
+  "files": {
+    ".nojekyll": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "UPLOAD_ALL_FILES_AR.txt": {
+      "bytes": 863,
+      "sha256": "62cfeac9670c27ba3d897e6e80d420b81e8dd9e26082c86e3810935408323edd"
+    },
+    "app.css": {
+      "bytes": 32019,
+      "sha256": "331efc4e5c7c086702381592bf64e20f9778017de675ae7c8d6258ef52b8496d"
+    },
+    "app.js": {
+      "bytes": 76597,
+      "sha256": "a9393391e90e5d8d6d5d0b36cfac05280633268410b83270a92d9c504b0b4d03"
+    },
+    "besselian_data.js": {
+      "bytes": 1277892,
+      "sha256": "2f6332d4d5a4656ff8bdb2da5be02a78528c5c2d310babd0e12461af597e17cb"
+    },
+    "cinematic-ui.js": {
+      "bytes": 2458,
+      "sha256": "c132dfd22d1a58b976bdab77651cd016f297b5e3dcafdd84b47aa46a62eff43e"
+    },
+    "core_cities.js": {
+      "bytes": 197742,
+      "sha256": "9af9ce86c957fa5a88d55e80945460e883e004623583d453f8562f17e2256176"
+    },
+    "de440_audit.js": {
+      "bytes": 505533,
+      "sha256": "46a57baba6945a02e0fee41caaf65ddf8aa802464d400cb341bfe550b04f5375"
+    },
+    "eclipse_engine.js": {
+      "bytes": 21413,
+      "sha256": "27f6f76ebe31b1a2ee334dee4022332b643663b792f80d719d47a4113ed1b7d7"
+    },
+    "geo_intelligence.js": {
+      "bytes": 11198,
+      "sha256": "bf34b958753df31706e7419d5c49eed40a9ea0c18038dd9bfdd981dd70e9f982"
+    },
+    "i18n.js": {
+      "bytes": 17827,
+      "sha256": "8cd9295016f9ed638043dd873ecd2f56266fcb1756565c2e0bfc8d8d7ee99fbc"
+    },
+    "index.html": {
+      "bytes": 17048,
+      "sha256": "a534308e55ed0ac0271aa59ef8fe5fec56294d40767e2b1ee7ae764594eb1d48"
+    },
+    "path_data.js": {
+      "bytes": 62191,
+      "sha256": "08ffa980721c5636866e9195c5650e4039485ed295ad51eb4556e4ca69835e9f"
+    },
+    "world-cities-spatial-adapter.js": {
+      "bytes": 2930,
+      "sha256": "6912c90de3bcda8421b06bf9dedf868ae4927e016b416ef7819c2fbaf5ab97ff"
+    },
+    "world_cities.js": {
+      "bytes": 608,
+      "sha256": "99a47e981666da01d069c27b3c4c0769a4eaf545c11bbe0d3080f859598f5239"
+    },
+    "world_data.js": {
+      "bytes": 230639,
+      "sha256": "84502d7345b93170834c153df2eef53ca050714f2a05756fd56a19085ea9d989"
+    }
+  },
+  "checks": {
+    "referenced_files": [
+      "app.css",
+      "besselian_data.js",
+      "path_data.js",
+      "world_data.js",
+      "de440_audit.js",
+      "eclipse_engine.js",
+      "core_cities.js",
+      "world_cities.js",
+      "geo_intelligence.js",
+      "world-cities-spatial-adapter.js",
+      "i18n.js",
+      "app.js",
+      "cinematic-ui.js"
+    ],
+    "all_references_exist": true,
+    "script_count": 12,
+    "style_external": true,
+    "build_marker": true
+  }
+}

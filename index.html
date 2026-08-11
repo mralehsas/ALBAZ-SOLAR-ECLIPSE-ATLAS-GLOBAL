@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#02060a" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="albaz-build" content="R3.5.2-GITHUB-CONTRAST" />
+  <meta name="description" content="ALBAZ Solar Eclipse Atlas — أطلس علمي تفاعلي للكسوف الشمسي باستخدام Besselian Elements وتدقيق JPL DE440." />
+  <title>ALBAZ Solar Eclipse Atlas — Global Scientific Edition R3.5.2</title>
+  <style id="albaz-critical-fallback">
+html,body{margin:0;min-height:100%;background:#010409;color:#f5fbff;font-family:"Segoe UI",Tahoma,Arial,sans-serif}a{color:inherit;text-decoration:none}
+</style>
+<link id="albaz-main-css" rel="stylesheet" href="./app.css?v=3520" />
+</head>
+<body>
+<div id="cssLoadGuard" style="position:fixed;z-index:100000;left:12px;bottom:12px;background:#8b1e2d;color:white;padding:10px 14px;border-radius:10px;font:700 13px Segoe UI,Arial,sans-serif;direction:ltr">CSS NOT LOADED — R3.5.2</div>
+
+  <div class="cosmic-bg" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div id="bootSequence" class="boot-sequence" aria-hidden="true">
+    <div class="boot-orbit"><span></span></div>
+    <strong>ALBAZ ASTROTECH</strong>
+    <small>INITIALIZING ECLIPSE SCIENCE ENGINE</small>
+    <div class="boot-line"><b></b></div>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="ALBAZ Solar Eclipse Atlas">
+      <span class="brand-mark"><span class="brand-eclipse"></span></span>
+      <span class="brand-copy">
+        <span class="eyebrow">ALBAZ ASTROTECH • SCIENTIFIC DIGITAL TWIN</span>
+        <strong>Solar Eclipse Atlas</strong>
+        <small>أطلس الكسوف الشمسي الذكي</small>
+      </span>
+    </a>
+    <nav class="topnav" aria-label="أقسام الأطلس">
+      <a href="#control">الحساب</a><a href="#mapPanel">الخريطة</a><a href="#resultsPanel">النتائج</a><a href="#geoPanel">GIS</a><a href="#reportPanel">التقرير</a>
+    </nav>
+    <div class="language-switch" role="group" aria-label="Language / اللغة">
+      <button id="langAr" class="active" type="button" aria-label="العربية">AR</button>
+      <button id="langEn" type="button" aria-label="English">EN</button>
+    </div>
+    <div class="engine-badges"><span><i></i>DE440</span><span>1550–2650</span><span>v0.1.9 GLOBAL • R3.5</span></div>
+  </header>
+
+  <main id="top" class="page">
+    <section class="hero-stage">
+      <div class="hero-copy">
+        <span class="section-kicker">CINEMATIC SCIENTIFIC ECLIPSE CONSOLE</span>
+        <h1>شاهد الكسوف كحدثٍ علمي حيّ، لا كجدول أرقام.</h1>
+        <p>محرك حسابي فلكي، خريطة ذكية، كرة أرضية ثلاثية الأبعاد، وذكاء جغرافي للمدن في تجربة بصرية واحدة.</p>
+        <div class="hero-trust">
+          <span><b>DE440</b><small>Ephemeris Audit</small></span>
+          <span><b>Besselian</b><small>Local Circumstances</small></span>
+          <span><b>GIS</b><small>Impact Intelligence</small></span>
+          <span><b>Offline Core</b><small>Scientific Dataset</small></span>
+        </div>
+      </div>
+      <div class="eclipse-theatre" aria-hidden="true">
+        <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div>
+        <div class="sun-disc"></div><div class="moon-disc"></div><div class="diamond-ring"></div>
+        <div class="theatre-label"><span>LIVE GEOMETRY</span><b>SUN • MOON • EARTH</b></div>
+      </div>
+    </section>
+
+    <section class="mission panel">
+      <div class="mission-top">
+        <div><span class="section-kicker">ECLIPSE COMMAND CENTER</span><h2>مركز قيادة الكسوف</h2><p>ابدأ باختيار الحدث والموقع. بعد نجاح الحل المحلي فقط تُفتح طبقات المسار والنتائج وImpact GIS.</p></div>
+        <div class="status-orbit"><i></i><span>Scientific Engine</span><b>READY</b></div>
+      </div>
+      <div class="mission-kpis">
+        <div><small>التاريخ</small><strong id="atlasKpiDate">—</strong></div>
+        <div><small>نوع الكسوف</small><strong id="atlasKpiType">—</strong></div>
+        <div><small>الأعظم UTC</small><strong id="atlasKpiGreatest">—</strong></div>
+        <div><small>المقدار العالمي</small><strong id="atlasKpiMagnitude">—</strong></div>
+      </div>
+    </section>
+
+    <section id="control" class="control-deck">
+      <section class="panel controls event-console">
+        <div class="panel-title"><span>01</span><div><b>اختيار الحدث</b><small>EVENT SELECTION</small></div></div>
+        <div class="grid two">
+          <label>السنة<input id="year" type="number" min="1550" max="2650" value="2026" inputmode="numeric" /></label>
+          <label>الكسوف<select id="event"></select></label>
+        </div>
+        <div id="eventMeta" class="event-meta"></div>
+        <div class="engine-health">
+          <div id="de440Status" class="science-status">JPL DE440: جارٍ التحقق من طبقة التدقيق المضمّنة…</div>
+          <div id="cityDbStatus" class="science-status">WORLD_CITIES_SPATIAL_FINAL: جارٍ التحقق من قاعدة المدن…</div>
+        </div>
+      </section>
+
+      <section class="panel controls observer-panel">
+        <div class="panel-title"><span>02</span><div><b>موقع الراصد</b><small>OBSERVER CONTROL</small></div></div>
+        <label>موقع سريع<select id="preset"></select></label>
+        <div class="grid three">
+          <label>خط العرض °<input id="lat" type="number" step="0.000001" value="40.4168" inputmode="decimal" /></label>
+          <label>خط الطول °<input id="lon" type="number" step="0.000001" value="-3.7038" inputmode="decimal" /></label>
+          <label>الارتفاع m<input id="alt" type="number" step="1" value="667" inputmode="numeric" /></label>
+        </div>
+        <div class="grid two">
+          <label>فرق التوقيت عن UTC<input id="tz" type="number" step="0.5" min="-12" max="14" value="2" inputmode="decimal" /></label>
+          <label>اسم الموقع في التقرير<input id="placeName" type="text" value="مدريد — إسبانيا" /></label>
+        </div>
+        <button id="calculate" class="primary calculate-btn" type="button"><span class="calc-icon">◎</span><span class="calc-copy"><b>ابدأ الحساب العلمي</b><small>C1 • C2 • MAX • C3 • C4</small></span><span class="calc-arrow">←</span></button>
+        <div class="calc-progress" aria-hidden="true"><span></span></div>
+        <div id="calcStageText" class="calc-stage-text" aria-live="polite">جاهز للحساب</div>
+        <div id="calcError" class="error hidden"></div>
+      </section>
+    </section>
+
+    <section id="mapPanel" class="panel map-panel hidden">
+      <div class="map-head">
+        <div class="panel-title"><span>03</span><div><b>المختبر الجغرافي الذكي</b><small>SMART ECLIPSE GIS • 2D / 3D</small></div></div>
+        <div class="map-live"><i></i><span id="mapStatus">الخريطة الأساسية جاهزة</span></div>
+      </div>
+      <div class="atlas-toolbar">
+        <div class="tabs"><button data-view="flat" class="tab active">▱ خريطة 2D</button><button data-view="globe" class="tab">◉ كرة 3D</button></div>
+        <div class="layer-buttons"><button id="fieldToggle" class="layer active">◉ مجال الكسوف</button><button id="nightToggle" class="layer active">◐ الليل/النهار</button><button id="citiesToggle" class="layer active">⌖ مدن الكسوف</button><button id="focusGreatest" class="layer">✦ الأعظم</button></div>
+      </div>
+      <div class="canvas-shell">
+        <div class="map-scan" aria-hidden="true"></div>
+        <canvas id="mapCanvas" width="1440" height="780"></canvas>
+        <div class="corner-bracket cb-a"></div><div class="corner-bracket cb-b"></div><div class="corner-bracket cb-c"></div><div class="corner-bracket cb-d"></div>
+        <div class="map-hud"><span class="hud-label">LIVE EVENT</span><strong id="liveEvent">—</strong><small id="liveLocation">اضغط على الخريطة لاختيار موقع</small></div>
+        <div class="impact-map-hud"><span>IMPACTED CITIES</span><strong id="impactHudCount">—</strong><small id="impactHudBreakdown">بانتظار الحساب</small></div>
+        <div id="fieldLegend" class="field-legend"><b>المقدار المحلي عند الأعظم</b><div class="gradient"></div><div class="scale"><span>0.10</span><span>0.50</span><span>0.80</span><span>0.95</span><span>1.00+</span></div></div>
+        <div class="legend"><span><i class="line center"></i>خط المركز</span><span><i class="line edge"></i>حدود المسار</span><span><i class="dot ge"></i>أعظم الكسوف</span><span><i class="dot site"></i>الراصد</span></div>
+      </div>
+      <div class="map-caption"><p id="pathSource" class="source-note"></p><p id="preCalcHint" class="source-note strong-note">قبل الحساب تظهر الخريطة كأساس جغرافي فقط؛ المسار والمجال العلمي ومدن الكسوف تظهر بعد الحل الناجح.</p></div>
+      <div id="impactConsole" class="impact-console">
+        <div class="impact-head"><div><b>مدن الكسوف المتأثرة</b><small>IMPACTED CITIES LIVE GIS</small></div><span id="impactScanStatus">بانتظار الحساب…</span></div>
+        <div class="impact-kpis"><div><small>متأثرة هندسيًا</small><strong id="impactAllCount">0</strong></div><div><small>مرئية مبدئيًا</small><strong id="impactVisibleCount">0</strong></div><div class="total"><small>كلي</small><strong id="impactTotalCount">0</strong></div><div class="annular"><small>حلقي</small><strong id="impactAnnularCount">0</strong></div><div class="partial"><small>جزئي</small><strong id="impactPartialCount">0</strong></div></div>
+        <div class="impact-filters"><button class="impact-filter" data-impact-filter="all">الكل</button><button class="impact-filter active" data-impact-filter="visible">فوق الأفق</button><button class="impact-filter" data-impact-filter="total">كلي</button><button class="impact-filter" data-impact-filter="annular">حلقي</button><button class="impact-filter" data-impact-filter="partial">جزئي</button></div>
+        <div id="impactedCitiesList" class="impact-city-list"><span class="impact-empty">لا توجد نتيجة بعد. اضغط زر الحساب أولًا.</span></div>
+        <p class="impact-method">بنفسجي = كلي • برتقالي = حلقي • ذهبي = جزئي. اختيار المدينة ينفّذ الحل المحلي الكامل لها.</p>
+      </div>
+    </section>
+
+    <section id="resultsPanel" class="panel result-panel hidden">
+      <div class="panel-title"><span>04</span><div><b>النتيجة العلمية</b><small>LOCAL CIRCUMSTANCES</small></div></div>
+      <div class="result-head"><div><small>النوع المحلي</small><strong id="localType">—</strong></div><div><small>المقدار</small><strong id="magnitude">—</strong></div><div><small>الاحتجاب</small><strong id="obscuration">—</strong></div><div><small>ارتفاع الشمس</small><strong id="sunAlt">—</strong></div></div>
+      <div class="eclipse-timeline" aria-label="التسلسل الزمني للكسوف">
+        <div class="timeline-track"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="contacts">
+          <div class="contact"><b>C1</b><span>التماس الأول</span><strong id="c1">—</strong><small id="c1alt"></small></div>
+          <div class="contact central"><b>C2</b><span>بداية المركزية</span><strong id="c2">—</strong><small id="c2alt"></small></div>
+          <div class="contact max"><b>MAX</b><span>الأعظم المحلي</span><strong id="max">—</strong><small id="maxalt"></small></div>
+          <div class="contact central"><b>C3</b><span>نهاية المركزية</span><strong id="c3">—</strong><small id="c3alt"></small></div>
+          <div class="contact"><b>C4</b><span>التماس الرابع</span><strong id="c4">—</strong><small id="c4alt"></small></div>
+        </div>
+      </div>
+      <div id="visibilityNote" class="note"></div>
+    </section>
+
+    <section id="geoPanel" class="panel hidden">
+      <div class="panel-title"><span>05</span><div><b>ذكاء الدول والمدن</b><small>WORLD CITY ENGINE</small></div></div>
+      <p class="source-note">محرك GIS يرشّح المواقع جغرافيًا ثم يمررها إلى نفس الحل الفلكي المحلي؛ الخريطة ليست بديلًا عن الحساب العلمي.</p>
+      <div class="geo-toolbar"><button id="scanCities" class="primary" type="button">اكتشف الدول والمدن داخل المسار المركزي</button><div id="geoStats" class="note"></div></div>
+      <div class="grid two geo-filterbar"><label>بحث داخل مدن هذا الكسوف<input id="geoQuery" type="search" placeholder="اكتب مدينة أو دولة" /></label><label>ترتيب المدن<select id="geoSort"><option value="score">أفضلية الرصد العلمية</option><option value="duration">أطول مدة مركزية</option><option value="center">الأقرب إلى خط المركز</option><option value="altitude">أعلى ارتفاع للشمس</option><option value="population">عدد السكان</option></select></label></div>
+      <div id="geoCountries" class="country-chips"></div>
+      <h3 class="subhead">أفضل مدن الرصد</h3><div id="geoTop" class="geo-top"></div><div id="geoCities" class="geo-cities"></div>
+      <div class="city-history"><h3>المستكشف التاريخي للمدن 1550–2650</h3><p class="source-note">ابحث عن مدينة ليحسب المحرك الكسوفات المركزية التي تمر بها ويعرض C1 • C2 • MAX • C3 • C4.</p><div class="history-search"><input id="historyCitySearch" type="search" placeholder="مثال: Mosul / الموصل" /><button id="findHistoryCity" type="button">ابحث عن المدينة</button></div><div id="historyCandidates" class="country-chips"></div><div id="historyStatus" class="note"></div><div id="historyResults" class="geo-cities hidden"></div></div>
+    </section>
+
+    <section id="reportPanel" class="panel report-panel hidden">
+      <div class="panel-title"><span>06</span><div><b>التقرير الذكي</b><small>SCIENTIFIC CINEMATIC REPORT</small></div></div>
+      <div id="report" class="report"></div>
+      <div class="actions"><button id="saveJson">JSON</button><button id="saveCsv">CSV</button><button id="saveHtml">HTML</button><button id="savePng">PNG</button><button id="printPdf">PDF</button><button id="shareReport">مشاركة</button></div>
+    </section>
+
+    <section class="panel methodology">
+      <div class="panel-title"><span>Σ</span><div><b>المنهج العلمي</b><small>SCIENTIFIC METHOD</small></div></div>
+      <div class="method-grid"><p>الحساب المحلي C1/C2/MAX/C3/C4 يعتمد عناصر Besselian المضمّنة، مع طبقة تدقيق مستقلة لهندسة الحدث مقابل JPL DE440 داخل إصدار التطبيق.</p><p>طبقة المجال تبدأ بمعاينة سريعة ثم تُصقل تلقائيًا إلى شبكة أعلى دقة 6°×5° وتُعرض كرستر متصل ناعم بلا مربعات ظاهرة؛ طبقة الليل/النهار مستقلة ومخزنة مؤقتًا لتحسين أداء الهاتف. التقويم يولياني حتى 1582-10-04 وغريغوري من 1582-10-15.</p></div>
+    </section>
+  </main>
+
+  <footer><span>ALBAZ ASTROTECH</span><b>Global Bilingual Edition • Android / Web Ready</b><small>إعداد وتطوير: الفيزيائي عمر الباز</small></footer>
+
+  <script src="./besselian_data.js?v=3520"></script>
+  <script src="./path_data.js?v=3520"></script>
+  <script src="./world_data.js?v=3520"></script>
+  <script src="./de440_audit.js?v=3520"></script>
+  <script src="./eclipse_engine.js?v=3520"></script>
+  <script src="./core_cities.js?v=3520"></script>
+  <script src="./world_cities.js?v=3520"></script>
+  <script src="./geo_intelligence.js?v=3520"></script>
+  <script src="./world-cities-spatial-adapter.js?v=3520"></script>
+  <script src="./i18n.js?v=3520"></script>
+  <script src="./app.js?v=3520"></script>
+  <script src="./cinematic-ui.js?v=3520"></script>
+</body>
+</html>

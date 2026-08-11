@@ -1,0 +1,9 @@
+ALBAZ Solar Eclipse Atlas — GitHub Pages R3.5.2 Contrast Fixed
+
+1) فك الضغط.
+2) ارفع جميع الملفات الموجودة هنا إلى جذر المستودع معًا.
+3) يجب أن يكون index.html و app.css و app.js في المستوى نفسه.
+4) انتظر اكتمال GitHub Pages Deployment.
+5) افتح الرابط مع ?v=3520 ثم اضغط Ctrl+F5.
+
+الإصلاح: إزالة override خاطئ كان يجعل النص داكنًا ورفع التباين مع الحفاظ على الهوية السينمائية.
