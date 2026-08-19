@@ -1,4 +1,24 @@
-import org.gradle.api.tasks.Copy
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+
+abstract class GenerateBesselianAsset : DefaultTask() {
+    @get:InputFile
+    abstract val sourceFile: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val target = outputDirectory.file("besselian_data.js").get().asFile
+        target.parentFile.mkdirs()
+        sourceFile.get().asFile.copyTo(target, overwrite = true)
+    }
+}
 
 plugins {
     id("com.android.application")
@@ -32,17 +52,21 @@ android {
     }
 }
 
-val generatedBesselianAssets = layout.buildDirectory.dir("generated/besselianAssets")
-val syncBesselianData by tasks.registering(Copy::class) {
-    val repositoryCatalogue = rootProject.file("../besselian_data.js")
-    val fallbackFixture = rootProject.file("science-core/src/test/resources/besselian_fixture.js")
-    from(provider { if (repositoryCatalogue.exists()) repositoryCatalogue else fallbackFixture })
-    into(generatedBesselianAssets)
-    rename { "besselian_data.js" }
+val repositoryCatalogue = rootProject.file("../besselian_data.js")
+val fallbackFixture = rootProject.file("science-core/src/test/resources/besselian_fixture.js")
+val generateBesselianAsset = tasks.register<GenerateBesselianAsset>("generateBesselianAsset") {
+    sourceFile.set(if (repositoryCatalogue.exists()) repositoryCatalogue else fallbackFixture)
+    outputDirectory.set(layout.buildDirectory.dir("generated/besselianAssets"))
 }
 
-android.sourceSets["main"].assets.srcDir(generatedBesselianAssets)
-tasks.named("preBuild").configure { dependsOn(syncBesselianData) }
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            generateBesselianAsset,
+            GenerateBesselianAsset::outputDirectory
+        )
+    }
+}
 
 dependencies {
     implementation(project(":science-core"))

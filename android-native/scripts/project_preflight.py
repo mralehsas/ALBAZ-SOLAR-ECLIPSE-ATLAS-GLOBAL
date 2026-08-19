@@ -30,7 +30,8 @@ require_text("science-core/build.gradle.kts", ['org.jetbrains.kotlin.jvm', 'jvmT
 app_build = require_text("app/build.gradle.kts", [
     'compileSdk = 37', 'minSdk = 26', 'targetSdk = 37',
     'compose = true', 'androidx.compose:compose-bom:2026.08.00',
-    '../besselian_data.js', 'generated/besselianAssets'
+    '../besselian_data.js', 'generated/besselianAssets',
+    'androidComponents', 'addGeneratedSourceDirectory'
 ])
 require_text("gradle/wrapper/gradle-wrapper.properties", ['gradle-9.5.0-bin.zip'])
 require_file("app/src/main/AndroidManifest.xml")
