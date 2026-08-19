@@ -1,0 +1,27 @@
+ALBAZ SOLAR ECLIPSE ATLAS ANDROID — NATIVE DEV1 VERIFICATION
+============================================================
+Status: SOURCE SLICE / NOT AN APK CLAIM
+
+Scientific baseline recovered from prior R14.2 audit:
+- Native Java + JPL DE440 Full + WGS84 reference
+- 212 direct prior audit tests PASS / 0 FAIL
+- Mosul 1999 edge-sensitive total reference retained
+
+DEV1 implementation scope:
+- Pure Kotlin Besselian catalogue parser
+- Pure Kotlin local circumstances solver
+- Correct local magnitude for central local eclipses
+- C1/C2/MAX/C3/C4
+- Julian/Gregorian civil display conversion
+- DE440 strict fingerprint contract (verification gate only)
+- Compose Home/Results native Android shell
+
+Environment limitation:
+- Android SDK: unavailable
+- Gradle executable: unavailable
+- APK/AAB assembly: NOT RUN / NOT CLAIMED
+
+Required verification commands before packaging:
+- ./scripts/run_core_regression.sh
+- python3 scripts/project_preflight.py
+- source scan for WebView / Capacitor / dynamic versions / false DE440 READY claims

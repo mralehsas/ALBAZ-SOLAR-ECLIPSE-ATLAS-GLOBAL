@@ -1,0 +1,56 @@
+name: Android Native DEV1
+
+on:
+  push:
+    branches:
+      - android-native-dev1
+    paths:
+      - "android-native/**"
+      - "besselian_data.js"
+      - ".github/workflows/android-native-dev1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android API 37
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Static scientific preflight
+        working-directory: android-native
+        run: python3 scripts/project_preflight.py
+
+      - name: Core regression and Android debug build
+        working-directory: android-native
+        run: gradle --no-daemon :science-core:runCoreRegression :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALBAZ_ECLIPSE_ANDROID_NATIVE_DEV1_DEBUG_APK
+          path: android-native/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
