@@ -1,32 +1,16 @@
 package com.albaz.eclipse.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.albaz.eclipse.core.integrity.IntegrityStatus
 import com.albaz.eclipse.core.model.GlobalEclipseType
 
 @Composable
@@ -49,12 +33,7 @@ fun HomeScreen(
     val t = uiText(state.language)
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(
-            start = 18.dp,
-            end = 18.dp,
-            top = contentPadding.calculateTopPadding() + 14.dp,
-            bottom = contentPadding.calculateBottomPadding() + 22.dp
-        ),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = contentPadding.calculateTopPadding() + 14.dp, bottom = contentPadding.calculateBottomPadding() + 22.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -70,7 +49,6 @@ fun HomeScreen(
                 }
             }
         }
-
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -80,53 +58,49 @@ fun HomeScreen(
                         Text(t.ready, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                     }
                     HorizontalDivider()
-                    Text(t.de440Missing, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+                    val de440Label = when {
+                        state.de440Preparing -> t.de440Preparing
+                        state.de440Status == IntegrityStatus.VERIFIED -> t.de440Verified
+                        state.de440Status == IntegrityStatus.CORRUPT -> t.de440Corrupt
+                        else -> t.de440Missing
+                    }
+                    val de440Color = if (state.de440Status == IntegrityStatus.VERIFIED && !state.de440Preparing) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
+                    Text(de440Label, color = de440Color, fontWeight = FontWeight.SemiBold)
+                    if (state.de440Message.isNotBlank()) Text(state.de440Message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (state.de440Status == IntegrityStatus.VERIFIED) {
+                        val sun = state.de440SunDistanceKm; val moon = state.de440MoonDistanceKm
+                        if (sun != null && moon != null) Text("SPK smoke ET0 • Sun %.0f km • Moon %.0f km".format(sun, moon), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Text(t.de440Note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "${t.catalogue}: " + if (state.hasFullCatalogue) t.fullCatalogue else t.fixtureCatalogue,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("${t.catalogue}: " + if (state.hasFullCatalogue) t.fullCatalogue else t.fixtureCatalogue, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
-
         item {
             OutlinedCard(border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(t.event, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = state.yearText,
-                            onValueChange = onYearChange,
-                            label = { Text(t.year) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
+                        OutlinedTextField(value = state.yearText, onValueChange = onYearChange, label = { Text(t.year) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
                         Button(onClick = onSearchYear, modifier = Modifier.padding(top = 8.dp)) { Text(t.search) }
                     }
-                    if (state.loadingCatalogue) {
-                        Text("…", color = MaterialTheme.colorScheme.primary)
-                    } else if (state.yearEvents.isEmpty()) {
-                        Text(t.noEvents, color = MaterialTheme.colorScheme.error)
-                    } else {
-                        state.yearEvents.forEachIndexed { index, event ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Row {
-                                    RadioButton(selected = index == state.selectedEventIndex, onClick = { onEventSelected(index) })
-                                    Column(Modifier.padding(top = 8.dp)) {
-                                        Text("%04d-%02d-%02d".format(event.year, event.month, event.day), fontWeight = FontWeight.SemiBold)
-                                        Text(globalTypeLabel(event.globalType, t), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+                    if (state.loadingCatalogue) Text("…", color = MaterialTheme.colorScheme.primary)
+                    else if (state.yearEvents.isEmpty()) Text(t.noEvents, color = MaterialTheme.colorScheme.error)
+                    else state.yearEvents.forEachIndexed { index, event ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row {
+                                RadioButton(selected = index == state.selectedEventIndex, onClick = { onEventSelected(index) })
+                                Column(Modifier.padding(top = 8.dp)) {
+                                    Text("%04d-%02d-%02d".format(event.year, event.month, event.day), fontWeight = FontWeight.SemiBold)
+                                    Text(globalTypeLabel(event.globalType, t), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                Text("%.5f".format(event.globalMagnitude), modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.secondary)
                             }
+                            Text("%.5f".format(event.globalMagnitude), modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.secondary)
                         }
                     }
                 }
             }
         }
-
         item {
             OutlinedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -143,15 +117,9 @@ fun HomeScreen(
                 }
             }
         }
-
         state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
-
         item {
-            Button(
-                onClick = onCalculate,
-                enabled = !state.calculating && state.selectedEvent != null,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = onCalculate, enabled = !state.calculating && state.selectedEvent != null, modifier = Modifier.fillMaxWidth()) {
                 Text(if (state.calculating) t.calculating else t.calculate, modifier = Modifier.padding(vertical = 5.dp))
             }
             if (state.result != null) {

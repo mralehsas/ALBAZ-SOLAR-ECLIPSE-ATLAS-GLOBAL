@@ -6,14 +6,9 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 
 abstract class GenerateBesselianAsset : DefaultTask() {
-    @get:InputFile
-    abstract val sourceFile: RegularFileProperty
-
-    @get:OutputDirectory
-    abstract val outputDirectory: DirectoryProperty
-
-    @TaskAction
-    fun generate() {
+    @get:InputFile abstract val sourceFile: RegularFileProperty
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+    @TaskAction fun generate() {
         val target = outputDirectory.file("besselian_data.js").get().asFile
         target.parentFile.mkdirs()
         sourceFile.get().asFile.copyTo(target, overwrite = true)
@@ -28,28 +23,20 @@ plugins {
 android {
     namespace = "com.albaz.eclipse"
     compileSdk = 37
-
     defaultConfig {
         applicationId = "com.albaz.eclipse"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2001
-        versionName = "0.2.0-dev1"
+        versionCode = 2002
+        versionName = "0.3.0-dev2"
     }
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-
+    buildFeatures { compose = true; buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    packaging {
-        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-    }
+    androidResources { noCompress += "bsp" }
+    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 
 val repositoryCatalogue = rootProject.file("../besselian_data.js")
@@ -61,20 +48,15 @@ val generateBesselianAsset = tasks.register<GenerateBesselianAsset>("generateBes
 
 androidComponents {
     onVariants(selector().all()) { variant ->
-        variant.sources.assets?.addGeneratedSourceDirectory(
-            generateBesselianAsset,
-            GenerateBesselianAsset::outputDirectory
-        )
+        variant.sources.assets?.addGeneratedSourceDirectory(generateBesselianAsset, GenerateBesselianAsset::outputDirectory)
     }
 }
 
 dependencies {
     implementation(project(":science-core"))
-
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
-
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")

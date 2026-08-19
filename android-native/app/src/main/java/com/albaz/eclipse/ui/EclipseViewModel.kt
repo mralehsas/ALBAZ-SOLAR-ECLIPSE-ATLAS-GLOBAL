@@ -5,9 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.albaz.eclipse.core.BesselianLocalEngine
 import com.albaz.eclipse.core.catalog.JsWrappedBesselianCatalog
+import com.albaz.eclipse.core.integrity.IntegrityStatus
 import com.albaz.eclipse.core.model.BesselianElements
 import com.albaz.eclipse.core.model.LocalCircumstances
 import com.albaz.eclipse.core.model.Observer
+import com.albaz.eclipse.science.De440AssetStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +29,11 @@ data class EclipseUiState(
     val altitudeText: String = "667",
     val observerLabel: String = "Madrid",
     val loadingCatalogue: Boolean = true,
+    val de440Preparing: Boolean = true,
+    val de440Status: IntegrityStatus = IntegrityStatus.MISSING,
+    val de440Message: String = "",
+    val de440SunDistanceKm: Double? = null,
+    val de440MoonDistanceKm: Double? = null,
     val calculating: Boolean = false,
     val result: LocalCircumstances? = null,
     val error: String? = null
@@ -41,6 +48,7 @@ class EclipseViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         viewModelScope.launch { loadCatalogueAndYear(2026) }
+        viewModelScope.launch { prepareDe440() }
     }
 
     fun setLanguage(language: AppLanguage) = _state.update { it.copy(language = language) }
@@ -49,15 +57,12 @@ class EclipseViewModel(application: Application) : AndroidViewModel(application)
     fun setLongitude(value: String) = _state.update { it.copy(longitudeText = value, error = null) }
     fun setAltitude(value: String) = _state.update { it.copy(altitudeText = value, error = null) }
     fun selectEvent(index: Int) = _state.update { it.copy(selectedEventIndex = index, result = null, error = null) }
-
     fun useMadrid() = setObserver("Madrid", "40.4168", "-3.7038", "667")
     fun useMosul() = setObserver("Mosul", "36.333333", "43.133333", "223")
     fun useBaghdad() = setObserver("Baghdad", "33.3152", "44.3661", "34")
 
     private fun setObserver(label: String, lat: String, lon: String, alt: String) {
-        _state.update {
-            it.copy(observerLabel = label, latitudeText = lat, longitudeText = lon, altitudeText = alt, result = null, error = null)
-        }
+        _state.update { it.copy(observerLabel = label, latitudeText = lat, longitudeText = lon, altitudeText = alt, result = null, error = null) }
     }
 
     fun searchYear() {
@@ -82,18 +87,26 @@ class EclipseViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(error = "Invalid observer coordinates") }
             return
         }
-
         _state.update { it.copy(calculating = true, error = null) }
         viewModelScope.launch {
             runCatching {
-                withContext(Dispatchers.Default) {
-                    BesselianLocalEngine.solve(event, Observer(lat, lon, alt, snapshot.observerLabel))
-                }
-            }.onSuccess { result ->
-                _state.update { it.copy(calculating = false, result = result) }
-            }.onFailure { failure ->
-                _state.update { it.copy(calculating = false, error = failure.message ?: "Calculation failed") }
-            }
+                withContext(Dispatchers.Default) { BesselianLocalEngine.solve(event, Observer(lat, lon, alt, snapshot.observerLabel)) }
+            }.onSuccess { result -> _state.update { it.copy(calculating = false, result = result) } }
+             .onFailure { failure -> _state.update { it.copy(calculating = false, error = failure.message ?: "Calculation failed") } }
+        }
+    }
+
+    private suspend fun prepareDe440() {
+        _state.update { it.copy(de440Preparing = true, de440Message = "") }
+        val prepared = withContext(Dispatchers.IO) { De440AssetStore.prepare(getApplication<Application>()) }
+        _state.update {
+            it.copy(
+                de440Preparing = false,
+                de440Status = prepared.status,
+                de440Message = prepared.message,
+                de440SunDistanceKm = prepared.sunDistanceKmAtJ2000,
+                de440MoonDistanceKm = prepared.moonDistanceKmAtJ2000
+            )
         }
     }
 
@@ -105,15 +118,7 @@ class EclipseViewModel(application: Application) : AndroidViewModel(application)
                 JsWrappedBesselianCatalog.parse(source)
             }
         }.onSuccess { events ->
-            _state.update {
-                it.copy(
-                    allEvents = events,
-                    yearEvents = events.filter { event -> event.year == year },
-                    selectedEventIndex = 0,
-                    loadingCatalogue = false,
-                    result = null
-                )
-            }
+            _state.update { it.copy(allEvents = events, yearEvents = events.filter { event -> event.year == year }, selectedEventIndex = 0, loadingCatalogue = false, result = null) }
         }.onFailure { failure ->
             _state.update { it.copy(loadingCatalogue = false, error = failure.message ?: "Catalogue load failed") }
         }
@@ -121,18 +126,7 @@ class EclipseViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun loadYear(year: Int) {
         val events = _state.value.allEvents
-        if (events.isEmpty()) {
-            loadCatalogueAndYear(year)
-            return
-        }
-        _state.update {
-            it.copy(
-                yearText = year.toString(),
-                yearEvents = events.filter { event -> event.year == year },
-                selectedEventIndex = 0,
-                result = null,
-                error = null
-            )
-        }
+        if (events.isEmpty()) { loadCatalogueAndYear(year); return }
+        _state.update { it.copy(yearText = year.toString(), yearEvents = events.filter { event -> event.year == year }, selectedEventIndex = 0, result = null, error = null) }
     }
 }
