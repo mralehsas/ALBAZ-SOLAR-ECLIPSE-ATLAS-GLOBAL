@@ -8,6 +8,13 @@ on:
       - "android-native/**"
       - "besselian_data.js"
       - ".github/workflows/android-native-dev1.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "android-native/**"
+      - "besselian_data.js"
+      - ".github/workflows/android-native-dev1.yml"
   workflow_dispatch:
 
 permissions:
