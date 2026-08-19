@@ -1,0 +1,125 @@
+name: Android Native DEV2
+
+on:
+  push:
+    branches:
+      - android-native-dev1
+    paths:
+      - "android-native/**"
+      - "besselian_data.js"
+      - ".github/workflows/android-native-dev1.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "android-native/**"
+      - "besselian_data.js"
+      - ".github/workflows/android-native-dev1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android API 37
+        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Cache official DE440
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/albaz-de440/de440.bsp
+          key: de440-a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5
+
+      - name: Prepare and verify official DE440
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$HOME/.cache/albaz-de440"
+          KERNEL="$CACHE/de440.bsp"
+          PARTS=/tmp/de440_parts
+          mkdir -p "$CACHE" "$PARTS" android-native/app/src/main/assets
+          if [ ! -f "$KERNEL" ]; then
+            curl -fL --retry 5 --retry-delay 2 \
+              https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440.bsp \
+              -o "$KERNEL"
+          fi
+          echo "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5  $KERNEL" | sha256sum -c -
+          test "$(stat -c%s "$KERNEL")" = "119799808"
+          cp "$KERNEL" android-native/app/src/main/assets/de440.bsp
+
+          rm -f "$PARTS"/de440.bsp.part*
+          split -b 33554432 -d -a 3 --numeric-suffixes=1 "$KERNEL" "$PARTS/de440.bsp.part"
+          echo "c82327e943876775462eae7f50a9ba75259f9e6074a08b613fa423640d6d1b84  $PARTS/de440.bsp.part001" | sha256sum -c -
+          echo "3bf39a078cdbb920cd44231d3fc24dc87ffb766703cbb5faa96d02c38bfb82f2  $PARTS/de440.bsp.part002" | sha256sum -c -
+          echo "7189ab5e85a73d8bd1fe67111c7cfca5b8af34aa18511c366ab1e354fdcdcb8a  $PARTS/de440.bsp.part003" | sha256sum -c -
+          echo "2f6ca02ce40deb793b95cfea43c412616e151924cf496ca666dd3e5ad76b0105  $PARTS/de440.bsp.part004" | sha256sum -c -
+
+      - name: Static scientific preflight
+        working-directory: android-native
+        run: python3 scripts/project_preflight.py
+
+      - name: Core, DE440 and Android debug build
+        working-directory: android-native
+        run: |
+          gradle --no-daemon \
+            :science-core:runCoreRegression \
+            :science-core:runDe440SpkRegression \
+            :science-core:runDe440AssemblerRegression \
+            :app:assembleDebug \
+            -Pde440Path="$HOME/.cache/albaz-de440/de440.bsp" \
+            -Pde440PartsDir=/tmp/de440_parts
+
+      - name: Inspect APK scientific assets
+        working-directory: android-native
+        shell: python
+        run: |
+          import hashlib, zipfile
+          from pathlib import Path
+
+          apk = Path("app/build/outputs/apk/debug/app-debug.apk")
+          expected_kernel_hash = "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5"
+          with zipfile.ZipFile(apk) as z:
+              kernel = z.getinfo("assets/de440.bsp")
+              assert kernel.file_size == 119_799_808, kernel.file_size
+              assert kernel.compress_type == zipfile.ZIP_STORED, kernel.compress_type
+              h = hashlib.sha256()
+              with z.open(kernel) as src:
+                  for block in iter(lambda: src.read(1024 * 1024), b""):
+                      h.update(block)
+              assert h.hexdigest() == expected_kernel_hash, h.hexdigest()
+
+              catalogue = z.read("assets/besselian_data.js").decode("utf-8")
+              payload = catalogue.split('window.ALBAZ_BESSELIAN_CSV = "', 1)[1].split('";', 1)[0]
+              rows = payload.count("\\n") - 1
+              assert rows == 2613, rows
+          print("APK_SCIENTIFIC_ASSET_AUDIT PASS")
+
+      - name: Upload DEV2 debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALBAZ_ECLIPSE_ANDROID_NATIVE_DEV2_DE440_DEBUG_APK
+          path: android-native/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
