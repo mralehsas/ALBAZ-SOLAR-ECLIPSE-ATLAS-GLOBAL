@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  structure:
+  native-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,9 +26,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Discover Gradle projects
+      - name: Run native scientific tests
         working-directory: android-native
-        run: gradle projects
-      - name: Run foundation scientific tests
-        working-directory: android-native
-        run: gradle :core-domain:test :core-time:test
+        run: gradle :core-domain:test :core-time:test :core-eclipse:test
