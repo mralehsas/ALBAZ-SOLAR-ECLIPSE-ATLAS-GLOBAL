@@ -1,0 +1,16 @@
+name: Android Native CI
+
+on:
+  push:
+    branches:
+      - android-native-scientific-edition
+  workflow_dispatch:
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify native project structure
+        run: python android-native/verify_project.py
