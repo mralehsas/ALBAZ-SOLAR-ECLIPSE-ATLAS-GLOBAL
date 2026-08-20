@@ -9,6 +9,7 @@ kotlin {
 dependencies {
     implementation(project(":core-domain"))
     testImplementation(libs.junit.jupiter)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.test {
