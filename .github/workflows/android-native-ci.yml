@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - android-native-scientific-edition
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -14,3 +17,15 @@ jobs:
         uses: actions/checkout@v4
       - name: Verify native project structure
         run: python android-native/verify_project.py
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Discover Gradle projects
+        working-directory: android-native
+        run: gradle projects
