@@ -29,6 +29,6 @@ jobs:
       - name: Discover Gradle projects
         working-directory: android-native
         run: gradle projects
-      - name: Run core-time tests
+      - name: Run foundation scientific tests
         working-directory: android-native
-        run: gradle :core-time:test --tests '*CivilCalendarTest*'
+        run: gradle :core-domain:test :core-time:test
