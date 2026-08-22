@@ -25,7 +25,7 @@ class BesselianLocalEngineRegressionTest {
         assertNearUtc("18:35:56.933", result.contacts.c2, 5.0)
         assertNearUtc("18:36:54.700", result.contacts.maximum, 5.0)
         assertNearUtc("18:37:52.465", result.contacts.c3, 5.0)
-        assertEquals(1.002764954, result.magnitude, 5e-6)
+        assertMagnitudeNear(1.002764954, result.magnitude, 5e-6)
     }
 
     @Test
@@ -37,7 +37,7 @@ class BesselianLocalEngineRegressionTest {
         assertNearUtc("16:34:29.515", result.contacts.c2, 5.0)
         assertNearUtc("16:36:52.970", result.contacts.maximum, 5.0)
         assertNearUtc("16:39:16.349", result.contacts.c3, 5.0)
-        assertEquals(0.970202323, result.magnitude, 5e-6)
+        assertMagnitudeNear(0.970202323, result.magnitude, 5e-6)
     }
 
     @Test
@@ -49,7 +49,7 @@ class BesselianLocalEngineRegressionTest {
         assertNearUtc("11:46:35.375", result.contacts.c2, 5.0)
         assertNearUtc("11:46:54.148", result.contacts.maximum, 5.0)
         assertNearUtc("11:47:12.684", result.contacts.c3, 5.0)
-        assertEquals(1.000600778, result.magnitude, 8e-6)
+        assertMagnitudeNear(1.000600778, result.magnitude, 8e-6)
     }
 
     private fun assertNearUtc(expected: String, actual: Instant?, toleranceSeconds: Double) {
@@ -59,6 +59,13 @@ class BesselianLocalEngineRegressionTest {
         assertTrue(
             abs(expectedSeconds - actualSeconds) <= toleranceSeconds,
             "expected $expected UTC but got ${actual.atZone(ZoneOffset.UTC).toLocalTime()} UTC",
+        )
+    }
+
+    private fun assertMagnitudeNear(expected: Double, actual: Double, tolerance: Double) {
+        assertTrue(
+            abs(expected - actual) <= tolerance,
+            "expected magnitude=$expected but calculated=$actual delta=${actual - expected}",
         )
     }
 }
