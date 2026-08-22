@@ -18,7 +18,7 @@ jobs:
       - name: Verify native project structure
         run: python android-native/verify_project.py
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -28,4 +28,4 @@ jobs:
           gradle-version: '9.5.0'
       - name: Run native scientific tests
         working-directory: android-native
-        run: gradle :core-domain:test :core-time:test :core-eclipse:test
+        run: gradle :core-domain:test :core-time:test :core-eclipse:test :core-local:test
