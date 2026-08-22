@@ -9,6 +9,7 @@ import java.time.ZoneOffset
 import kotlin.math.abs
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -50,6 +51,34 @@ class BesselianLocalEngineRegressionTest {
         assertNearUtc("11:46:54.148", result.contacts.maximum, 5.0)
         assertNearUtc("11:47:12.684", result.contacts.c3, 5.0)
         assertMagnitudeNear(1.000600778, result.magnitude, 3e-4)
+    }
+
+    @Test
+    fun `New York 2024 is partial and has no central contacts`() {
+        val event = requireNotNull(catalog.findExact(2024, 4, 8))
+        val result = engine.calculate(event, ObserverLocation(40.7128, -74.0060, 10.0))
+
+        assertEquals(LocalEclipseType.PARTIAL, result.localType)
+        assertNotNull(result.contacts.c1)
+        assertNotNull(result.contacts.maximum)
+        assertNotNull(result.contacts.c4)
+        assertNull(result.contacts.c2)
+        assertNull(result.contacts.c3)
+    }
+
+    @Test
+    fun `Baghdad 2024 eclipse geometry below horizon is not locally visible`() {
+        val event = requireNotNull(catalog.findExact(2024, 4, 8))
+        val result = engine.calculate(event, ObserverLocation(33.3152, 44.3661, 34.0))
+
+        assertEquals(LocalEclipseType.NOT_VISIBLE, result.localType)
+        assertNull(result.contacts.c1)
+        assertNull(result.contacts.c2)
+        assertNull(result.contacts.maximum)
+        assertNull(result.contacts.c3)
+        assertNull(result.contacts.c4)
+        assertEquals(0.0, result.magnitude, 0.0)
+        assertEquals(0.0, result.obscuration, 0.0)
     }
 
     private fun assertNearUtc(expected: String, actual: Instant?, toleranceSeconds: Double) {
