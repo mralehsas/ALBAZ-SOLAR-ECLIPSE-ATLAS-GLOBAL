@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
 }
@@ -18,4 +20,11 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        events("failed")
+        exceptionFormat = TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+    }
 }
