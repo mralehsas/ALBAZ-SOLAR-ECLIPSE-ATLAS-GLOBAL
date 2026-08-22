@@ -256,17 +256,14 @@ class BesselianLocalEngine {
 
     private fun geometryAtMid(mid: Circumstances): MidGeometry {
         val denominator = mid.l1Prime + mid.l2Prime
-        var magnitude = if (denominator != 0.0) (mid.l1Prime - mid.m) / denominator else 0.0
+        val magnitude = if (denominator != 0.0) (mid.l1Prime - mid.m) / denominator else 0.0
         val ratio = if (denominator != 0.0) (mid.l1Prime - mid.l2Prime) / denominator else 0.0
-        var kind = GeometryKind.NONE
-        if (magnitude > 0.0) {
-            kind = if (mid.m < abs(mid.l2Prime)) {
-                if (mid.l2Prime < 0.0) GeometryKind.TOTAL else GeometryKind.ANNULAR
-            } else {
-                GeometryKind.PARTIAL
-            }
+        val kind = when {
+            magnitude <= 0.0 -> GeometryKind.NONE
+            mid.m < abs(mid.l2Prime) && mid.l2Prime < 0.0 -> GeometryKind.TOTAL
+            mid.m < abs(mid.l2Prime) -> GeometryKind.ANNULAR
+            else -> GeometryKind.PARTIAL
         }
-        if (kind == GeometryKind.TOTAL || kind == GeometryKind.ANNULAR) magnitude = ratio
 
         var obscuration = 0.0
         if (magnitude >= 1.0) {
