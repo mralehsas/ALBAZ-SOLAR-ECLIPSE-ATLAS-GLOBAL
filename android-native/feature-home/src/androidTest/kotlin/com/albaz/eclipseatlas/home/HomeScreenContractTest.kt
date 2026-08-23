@@ -1,6 +1,5 @@
 package com.albaz.eclipseatlas.home
 
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import org.junit.Rule
@@ -28,10 +27,10 @@ class HomeScreenContractTest {
             )
         }
 
-        composeRule.onNodeWithTag("home.language.ar").assertExists()
-        composeRule.onNodeWithTag("home.language.en").assertExists()
-        composeRule.onNodeWithTag("home.date.year").assertExists()
-        composeRule.onNodeWithTag("home.location.latitude").assertExists()
-        composeRule.onNodeWithTag("home.calculate").assertExists()
+        composeRule.onNodeWithTag("home.language.ar").fetchSemanticsNode()
+        composeRule.onNodeWithTag("home.language.en").fetchSemanticsNode()
+        composeRule.onNodeWithTag("home.date.year").fetchSemanticsNode()
+        composeRule.onNodeWithTag("home.location.latitude").fetchSemanticsNode()
+        composeRule.onNodeWithTag("home.calculate").fetchSemanticsNode()
     }
 }
