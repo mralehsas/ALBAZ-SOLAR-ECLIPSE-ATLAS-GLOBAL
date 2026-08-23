@@ -45,18 +45,7 @@ class BesselianLocalEngine {
         )
 
         if (geometry.magnitude <= 0.0) {
-            return LocalEclipseResult(
-                event = event,
-                observer = observer,
-                localType = LocalEclipseType.NOT_VISIBLE,
-                contacts = ContactTimes(null, null, null, null, null),
-                magnitude = 0.0,
-                obscuration = 0.0,
-                maximumSunAltitudeDeg = mid.altitudeRad * RAD,
-                maximumSunAzimuthDeg = mid.azimuthRad * RAD,
-                centralDurationSeconds = null,
-                diagnostics = diagnostics,
-            )
+            return notVisibleResult(event, observer, mid, diagnostics)
         }
 
         val outerFn: (Circumstances) -> Double = { c -> c.m - c.l1Prime }
@@ -69,6 +58,15 @@ class BesselianLocalEngine {
             val innerFn: (Circumstances) -> Double = { c -> c.m - abs(c.l2Prime) }
             c2T = rootFromMid(elements, prepared, mid.tHours, innerFn, -1, 2.0)
             c3T = rootFromMid(elements, prepared, mid.tHours, innerFn, +1, 2.0)
+        }
+
+        val visibleIntervals = if (c1T != null && c4T != null) {
+            horizonIntervals(elements, prepared, c1T, c4T)
+        } else {
+            emptyList()
+        }
+        if (visibleIntervals.isEmpty()) {
+            return notVisibleResult(event, observer, mid, diagnostics)
         }
 
         val centralDuration = if (c2T != null && c3T != null) {
@@ -96,6 +94,24 @@ class BesselianLocalEngine {
             diagnostics = diagnostics,
         )
     }
+
+    private fun notVisibleResult(
+        event: EclipseEvent,
+        observer: ObserverLocation,
+        mid: Circumstances,
+        diagnostics: ScientificDiagnostics,
+    ): LocalEclipseResult = LocalEclipseResult(
+        event = event,
+        observer = observer,
+        localType = LocalEclipseType.NOT_VISIBLE,
+        contacts = ContactTimes(null, null, null, null, null),
+        magnitude = 0.0,
+        obscuration = 0.0,
+        maximumSunAltitudeDeg = mid.altitudeRad * RAD,
+        maximumSunAzimuthDeg = mid.azimuthRad * RAD,
+        centralDurationSeconds = null,
+        diagnostics = diagnostics,
+    )
 
     private fun prepareObserver(observer: ObserverLocation): PreparedObserver {
         val lat = observer.latitudeDeg * DEG
@@ -254,6 +270,48 @@ class BesselianLocalEngine {
         return null
     }
 
+    private fun horizonIntervals(
+        elements: BesselianElements,
+        observer: PreparedObserver,
+        startT: Double,
+        endT: Double,
+    ): List<Pair<Double, Double>> {
+        if (!startT.isFinite() || !endT.isFinite() || startT >= endT) return emptyList()
+
+        val horizonFn: (Circumstances) -> Double = { c -> c.altitudeRad - HORIZON_RAD }
+        val step = 120.0 / 3600.0
+        val points = mutableListOf(startT)
+        var t = startT + step
+        while (t < endT) {
+            points += t
+            t += step
+        }
+        points += endT
+
+        val intervals = mutableListOf<Pair<Double, Double>>()
+        var activeStart: Double? = null
+        var lastT = points.first()
+        var lastF = horizonFn(circumstancesAt(elements, observer, lastT))
+        if (lastF >= 0.0) activeStart = lastT
+
+        for (index in 1 until points.size) {
+            val currentT = points[index]
+            val currentF = horizonFn(circumstancesAt(elements, observer, currentT))
+            if (lastF < 0.0 && currentF >= 0.0) {
+                activeStart = bisect(elements, observer, horizonFn, lastT, currentT) ?: currentT
+            } else if (lastF >= 0.0 && currentF < 0.0 && activeStart != null) {
+                val intervalEnd = bisect(elements, observer, horizonFn, lastT, currentT) ?: lastT
+                intervals += activeStart to intervalEnd
+                activeStart = null
+            }
+            lastT = currentT
+            lastF = currentF
+        }
+
+        if (activeStart != null) intervals += activeStart to endT
+        return intervals.filter { (start, end) -> end > start }
+    }
+
     private fun geometryAtMid(mid: Circumstances): MidGeometry {
         val denominator = mid.l1Prime + mid.l2Prime
         val magnitude = if (denominator != 0.0) (mid.l1Prime - mid.m) / denominator else 0.0
@@ -337,6 +395,7 @@ class BesselianLocalEngine {
         const val RAD = 180.0 / PI
         const val EARTH_A_M = 6_378_140.0
         const val GEO_FACTOR = 0.99664719
+        const val HORIZON_RAD = -0.00524
         const val UNIX_EPOCH_JDN = 2_440_588L
     }
 }
