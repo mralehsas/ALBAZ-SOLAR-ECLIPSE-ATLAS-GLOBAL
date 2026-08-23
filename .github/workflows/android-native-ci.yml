@@ -28,4 +28,10 @@ jobs:
           gradle-version: '9.5.0'
       - name: Run native scientific tests
         working-directory: android-native
-        run: gradle :core-domain:test :core-time:test :core-eclipse:test :core-local:test
+        run: >-
+          gradle
+          :core-domain:test
+          :core-time:test
+          :core-eclipse:test
+          :core-local:test
+          :feature-home:testDebugUnitTest
