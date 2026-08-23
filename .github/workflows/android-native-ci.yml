@@ -35,3 +35,4 @@ jobs:
           :core-eclipse:test
           :core-local:test
           :feature-home:testDebugUnitTest
+          :feature-home:compileDebugAndroidTestKotlin
