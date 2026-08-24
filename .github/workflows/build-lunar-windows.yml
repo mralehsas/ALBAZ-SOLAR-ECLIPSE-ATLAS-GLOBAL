@@ -75,6 +75,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = (Get-Location).Path
           python scripts/fetch_geonames_lunar.py --cache-dir .geonames-cache --output data/world_cities.sqlite3
           if ($LASTEXITCODE -ne 0) { throw 'GeoNames database build failed' }
           if (!(Test-Path 'data/world_cities.sqlite3')) { throw 'City database not created' }
