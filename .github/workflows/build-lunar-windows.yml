@@ -86,7 +86,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force assets/images | Out-Null
-          curl.exe -L --retry 5 --retry-delay 3 --fail "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57752/land_ocean_ice_2048.png" -o "assets/images/world_map_premium_clean.png"
+          curl.exe -L --retry 5 --retry-delay 3 --fail "https://svs.gsfc.nasa.gov/vis/a000000/a002900/a002915/bluemarble-2048.png" -o "assets/images/world_map_premium_clean.png"
           if ($LASTEXITCODE -ne 0) { throw 'NASA map download failed' }
           if ((Get-Item 'assets/images/world_map_premium_clean.png').Length -lt 1MB) { throw 'NASA map asset is unexpectedly small' }
 
