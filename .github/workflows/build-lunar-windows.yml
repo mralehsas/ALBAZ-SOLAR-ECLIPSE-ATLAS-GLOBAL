@@ -1,0 +1,198 @@
+name: Build ALBAZ Lunar Windows x64
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Setup Python x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Reassemble and verify lunar source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $partNames = @(
+            'part00','part01','part02','part03','part04',
+            'part05a','part05b','part05c','part05d',
+            'part06a','part06b','part06c','part06d','part07'
+          )
+          $b64 = ''
+          foreach ($name in $partNames) {
+            $path = Join-Path 'ci/lunar_parts' $name
+            if (!(Test-Path $path)) { throw "Missing source part: $name" }
+            $b64 += Get-Content $path -Raw
+          }
+          [IO.File]::WriteAllBytes('lunar_source.zip', [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash lunar_source.zip -Algorithm SHA256).Hash.ToLower()
+          Write-Host "lunar_source_sha256=$hash"
+          if ($hash -ne '8930212d431799e6aa0f78efce90bf72998a2494d1a3ce5f4028581dfa46e062') {
+            throw "Lunar source SHA256 mismatch: $hash"
+          }
+          Expand-Archive lunar_source.zip -DestinationPath lunar_build -Force
+          if (!(Test-Path 'lunar_build/lunar_main.py')) { throw 'lunar_main.py missing after extraction' }
+
+      - name: Install build dependencies
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --upgrade pip
+          python -m pip install numpy scipy PySide6 pytest nuitka ordered-set zstandard
+
+      - name: Download official DE440 and IERS data
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force data | Out-Null
+          curl.exe -L --retry 5 --retry-delay 3 --fail "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp" -o "data/de440.bsp"
+          if ($LASTEXITCODE -ne 0) { throw 'DE440 download failed' }
+          curl.exe -L --retry 5 --retry-delay 3 --fail "https://maia.usno.navy.mil/ser7/finals2000A.all" -o "data/finals2000A.all"
+          if ($LASTEXITCODE -ne 0) { throw 'IERS download failed' }
+          if ((Get-Item 'data/de440.bsp').Length -lt 100MB) { throw 'DE440 file is unexpectedly small' }
+          if ((Get-Item 'data/finals2000A.all').Length -lt 1MB) { throw 'IERS file is unexpectedly small' }
+          Write-Host "DE440 bytes=$((Get-Item 'data/de440.bsp').Length)"
+          Write-Host "IERS bytes=$((Get-Item 'data/finals2000A.all').Length)"
+
+      - name: Build full GeoNames city database
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/fetch_geonames_lunar.py --cache-dir .geonames-cache --output data/world_cities.sqlite3
+          if ($LASTEXITCODE -ne 0) { throw 'GeoNames database build failed' }
+          if (!(Test-Path 'data/world_cities.sqlite3')) { throw 'City database not created' }
+
+      - name: Download NASA world map asset
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force assets/images | Out-Null
+          curl.exe -L --retry 5 --retry-delay 3 --fail "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57752/land_ocean_ice_2048.png" -o "assets/images/world_map_premium_clean.png"
+          if ($LASTEXITCODE -ne 0) { throw 'NASA map download failed' }
+          if ((Get-Item 'assets/images/world_map_premium_clean.png').Length -lt 1MB) { throw 'NASA map asset is unexpectedly small' }
+
+      - name: Run lunar scientific and UI contract tests
+        working-directory: lunar_build
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pytest -q `
+            tests/test_lunar_geometry.py `
+            tests/test_lunar_de440.py `
+            tests/test_lunar_solver.py `
+            tests/test_lunar_time_scales.py `
+            tests/test_lunar_visibility.py `
+            tests/test_lunar_services.py `
+            tests/test_lunar_map_controller.py `
+            tests/test_lunar_ui_contract.py
+          if ($LASTEXITCODE -ne 0) { throw 'Lunar test suite failed' }
+
+      - name: Source runtime smoke test
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:ALBAZ_LUNAR_RUNTIME_SMOKE = '1'
+          $ok = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_OK.json'
+          $fail = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAIL.txt'
+          Remove-Item $ok,$fail -Force -ErrorAction SilentlyContinue
+          python lunar_main.py
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path $fail) { Get-Content $fail }
+            throw "Source runtime smoke failed with code $LASTEXITCODE"
+          }
+          if (!(Test-Path $ok)) { throw 'Source runtime smoke success marker missing' }
+          Get-Content $ok
+
+      - name: Build standalone Windows EXE with Nuitka
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m nuitka `
+            --standalone `
+            --assume-yes-for-downloads `
+            --enable-plugin=pyside6 `
+            --msvc=latest `
+            --windows-console-mode=disable `
+            --output-dir=dist `
+            --output-filename=ALBAZ_LUNAR_ECLIPSE_ATLAS.exe `
+            --include-data-dir=assets=assets `
+            --include-data-file=data/de440.bsp=data/de440.bsp `
+            --include-data-file=data/finals2000A.all=data/finals2000A.all `
+            --include-data-file=data/world_cities.sqlite3=data/world_cities.sqlite3 `
+            lunar_main.py
+          if ($LASTEXITCODE -ne 0) { throw 'Nuitka build failed' }
+
+      - name: Smoke-test the actual packaged EXE
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $exe = Get-ChildItem -Path dist -Recurse -Filter 'ALBAZ_LUNAR_ECLIPSE_ATLAS.exe' | Select-Object -First 1
+          if (!$exe) { throw 'Packaged EXE not found' }
+          Write-Host "Testing EXE: $($exe.FullName)"
+          python scripts/lunar_runtime_smoke.py "$($exe.FullName)" --timeout 180
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE runtime smoke failed' }
+          "EXE_PATH=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "DIST_DIR=$($exe.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create portable Windows package
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (!(Test-Path $env:EXE_PATH)) { throw 'Verified EXE path missing' }
+          $dist = $env:DIST_DIR
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "ALBAZ_LUNAR_ECLIPSE_ATLAS.exe"
+          '@ | Set-Content (Join-Path $dist 'START_ALBAZ_LUNAR.cmd') -Encoding ASCII
+          @'
+          ALBAZ LUNAR ECLIPSE ATLAS v9.6.3 TESLA FINAL
+          Windows x64 Portable / Offline runtime.
+          Run START_ALBAZ_LUNAR.cmd or ALBAZ_LUNAR_ECLIPSE_ATLAS.exe.
+          Python, pip and an Internet connection are NOT required to run the packaged application.
+          Scientific engine: JPL DE440 + IERS EOP + Danjon lunar-shadow geometry.
+          '@ | Set-Content (Join-Path $dist 'README.txt') -Encoding UTF8
+          $zip = 'ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Set-Content "$zip.sha256" -Encoding ASCII
+          Write-Host "portable_sha256=$hash"
+          Get-Item $zip | Format-List Name,Length,FullName
+
+      - name: Upload verified Windows portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALBAZ-LUNAR-WINDOWS-x64-PORTABLE
+          path: |
+            lunar_build/ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip
+            lunar_build/ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
