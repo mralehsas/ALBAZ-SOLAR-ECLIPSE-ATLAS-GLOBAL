@@ -23,73 +23,21 @@ jobs:
           python-version: '3.12'
           architecture: 'x64'
 
-      - name: Reassemble and verify lunar source
+      - name: Verify exact audited R2 source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $partNames = @(
-            'part00','part01','part02','part03','part04',
-            'part05a','part05b','part05c','part05d',
-            'part06a','part06b','part06c','part06d','part07'
-          )
-          $b64 = ''
-          foreach ($name in $partNames) {
-            $path = Join-Path 'ci/lunar_parts' $name
-            if (!(Test-Path $path)) { throw "Missing source part: $name" }
-            $b64 += Get-Content $path -Raw
+          $src = 'ci/lunar_ci_source_r2.zip'
+          if (!(Test-Path $src)) { throw 'Exact audited R2 ZIP is missing' }
+          $hash = (Get-FileHash $src -Algorithm SHA256).Hash.ToLower()
+          Write-Host "R2_SOURCE_SHA256=$hash"
+          if ($hash -ne 'b84df5ed9f546759f8b7a75587fe55c4ad5e1dad93d5298207d40164c342ec8f') {
+            throw "Exact audited R2 SHA256 mismatch: $hash"
           }
-          [IO.File]::WriteAllBytes('lunar_source.zip', [Convert]::FromBase64String($b64))
-          $hash = (Get-FileHash lunar_source.zip -Algorithm SHA256).Hash.ToLower()
-          Write-Host "lunar_source_sha256=$hash"
-          if ($hash -ne '8930212d431799e6aa0f78efce90bf72998a2494d1a3ce5f4028581dfa46e062') {
-            throw "Lunar source SHA256 mismatch: $hash"
-          }
-          Expand-Archive lunar_source.zip -DestinationPath lunar_build -Force
-          if (!(Test-Path 'lunar_build/lunar_main.py')) { throw 'lunar_main.py missing after extraction' }
-
-      - name: Apply exact audited Lunar R2 overlay
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $overlayParts = @('part00','part01','part02','part03','part04','part05','part06')
-          $overlayB64 = ''
-          foreach ($name in $overlayParts) {
-            $path = Join-Path 'ci/lunar_r2_exact' $name
-            if (!(Test-Path $path)) { throw "Missing R2 overlay part: $name" }
-            $overlayB64 += Get-Content $path -Raw
-          }
-          [IO.File]::WriteAllBytes('lunar_r2_overlay.zip', [Convert]::FromBase64String($overlayB64))
-          $overlayHash = (Get-FileHash lunar_r2_overlay.zip -Algorithm SHA256).Hash.ToLower()
-          Write-Host "R2_OVERLAY_ARCHIVE_SHA256=$overlayHash"
-          Expand-Archive lunar_r2_overlay.zip -DestinationPath lunar_build -Force
-
-          $manifest = @{
-            'lunar_main.py' = '481e9490ce072521bd393b6fa4e3b3dd512f51ae17de06295f7dcd3dd57fab0a'
-            'lunar_bootstrap.py' = '4adfc8a6ea0231bf377cfdb8d952a71929c6727d762a70039f2f770a4105e557'
-            'lunar_scientific_regression.py' = 'c47ace46fd91eeb5c8f541d93b7906f6d4f649b4242ac92db9f722ba3421881e'
-            'lunar_release_preflight.py' = 'f33c7df9395e23dbd0234415ae5f1b4374d0bfc50b45e2a581f180d78a4b3257'
-            'lunar_core/solver.py' = '91fb06118ff2237336d5dead3ff5dae90da133a6ca4d4851c91c67da10e25d7c'
-            'lunar_core/time_scales.py' = '0270c6a41b78da247c348f86b14388cf8d4bf35c8c09ef2a8ebf595ee1915bc1'
-            'lunar_core/topocentric.py' = '826d1b651fde38efc3ed90f7fd9919ff01c74e4e7f521641402ef8dd517921d9'
-            'services/lunar_report_builder.py' = '10a78d15de6d8eea454d37f1651254ea485087f967c685eaeca66075557ee781'
-            'scripts/lunar_runtime_smoke.py' = '014c2374d6873f1698b3dfbdfb6da99020045e78d97cc895ebc8b0ce6ab4b7d3'
-            'tests/test_lunar_solver.py' = '4c632279ba946a333e8dfc96db6212301cf1cd7b05c65b7acd575275392a1a6a'
-            'tests/test_lunar_time_scales.py' = 'ce00f78ef475aeef9e8d521a302950e122092d812c071335124c33fb70af5e6b'
-            'tests/test_lunar_services.py' = 'db0560a77bc9433495f2664d36897df63cb1ccf7e505e03ab4104ab3c7c1c471'
-            'tests/test_lunar_ui_contract.py' = '189ecddc67c051bc9a4be4a8b6f20a83cc4a5b32b0a2593358c74eaecdea7d69'
-            'tests/test_lunar_visibility.py' = '65b1b2df078c488b8d364c029babc36253154a15a114dfab729354b6abed19a8'
-            'tests/test_lunar_packaging.py' = '8445aeabbb72ee0f9a9994197524a38d052676ebd918ec8e5c07be41ad69a797'
-            'tests/test_lunar_scientific_regression.py' = 'a513f0e33d65b59fd7f482165cf6c3adcc214f302866cbe586850bb1c653e0e8'
-          }
-          foreach ($rel in $manifest.Keys) {
-            $path = Join-Path 'lunar_build' $rel
-            if (!(Test-Path $path)) { throw "R2 audited file missing: $rel" }
-            $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
-            if ($actual -ne $manifest[$rel]) {
-              throw "R2 audited SHA mismatch for ${rel}: $actual"
-            }
-          }
-          Write-Host "R2_AUDITED_MANIFEST_OK=$($manifest.Count) files"
+          if (Test-Path lunar_build) { Remove-Item lunar_build -Recurse -Force }
+          Expand-Archive $src -DestinationPath lunar_build -Force
+          if (!(Test-Path 'lunar_build/lunar_bootstrap.py')) { throw 'lunar_bootstrap.py missing from R2 source' }
+          if (!(Test-Path 'lunar_build/lunar_main.py')) { throw 'lunar_main.py missing from R2 source' }
 
       - name: Install build dependencies
         working-directory: lunar_build
@@ -109,7 +57,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'DE440 download failed' }
           curl.exe -L --retry 5 --retry-delay 3 --fail "https://maia.usno.navy.mil/ser7/finals2000A.all" -o "data/finals2000A.all"
           if ($LASTEXITCODE -ne 0) { throw 'IERS download failed' }
-          if ((Get-Item 'data/de440.bsp').Length -lt 100MB) { throw 'DE440 file is unexpectedly small' }
+          if ((Get-Item 'data/de440.bsp').Length -ne 119799808) { throw "Unexpected DE440 byte size: $((Get-Item 'data/de440.bsp').Length)" }
           if ((Get-Item 'data/finals2000A.all').Length -lt 1MB) { throw 'IERS file is unexpectedly small' }
           Write-Host "DE440 bytes=$((Get-Item 'data/de440.bsp').Length)"
           Write-Host "IERS bytes=$((Get-Item 'data/finals2000A.all').Length)"
@@ -137,6 +85,8 @@ jobs:
       - name: Run release preflight
         working-directory: lunar_build
         shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           $ErrorActionPreference = 'Stop'
           python lunar_release_preflight.py
@@ -199,6 +149,21 @@ jobs:
             lunar_bootstrap.py
           if ($LASTEXITCODE -ne 0) { throw 'Nuitka build failed' }
 
+      - name: Verify packaged runtime contents
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Get-ChildItem -Path dist -Directory -Filter '*.dist' | Select-Object -First 1
+          if (!$dist) { throw 'Nuitka standalone dist directory missing' }
+          $exe = Join-Path $dist.FullName 'ALBAZ_LUNAR_ECLIPSE_ATLAS.exe'
+          if (!(Test-Path $exe)) { throw 'Packaged EXE missing' }
+          if (!(Test-Path (Join-Path $dist.FullName 'data/de440.bsp'))) { throw 'Packaged DE440 missing' }
+          if ((Get-Item (Join-Path $dist.FullName 'data/de440.bsp')).Length -ne 119799808) { throw 'Packaged DE440 size mismatch' }
+          if (!(Test-Path (Join-Path $dist.FullName 'data/finals2000A.all'))) { throw 'Packaged IERS missing' }
+          if (!(Test-Path (Join-Path $dist.FullName 'data/world_cities.sqlite3'))) { throw 'Packaged cities DB missing' }
+          Write-Host "PACKAGED_DIST=$($dist.FullName)"
+
       - name: Smoke-test the actual packaged EXE
         working-directory: lunar_build
         shell: pwsh
@@ -208,10 +173,39 @@ jobs:
           $exe = Get-ChildItem -Path dist -Recurse -Filter 'ALBAZ_LUNAR_ECLIPSE_ATLAS.exe' | Select-Object -First 1
           if (!$exe) { throw 'Packaged EXE not found' }
           Write-Host "Testing EXE: $($exe.FullName)"
-          python scripts/lunar_runtime_smoke.py "$($exe.FullName)" --timeout 180
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE runtime smoke failed' }
+          $pythonExe = (Get-Command python).Source
+          $savedPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & $pythonExe scripts/lunar_runtime_smoke.py "$($exe.FullName)" --timeout 180
+          $smokeCode = $LASTEXITCODE
+          $env:PATH = $savedPath
+          if ($smokeCode -ne 0) {
+            $startup = Join-Path $env:TEMP 'ALBAZ_LUNAR_STARTUP_FAILED.txt'
+            $runtime = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt'
+            if (Test-Path $startup) { Get-Content $startup }
+            if (Test-Path $runtime) { Get-Content $runtime }
+            throw "Packaged EXE runtime smoke failed with code $smokeCode"
+          }
           "EXE_PATH=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "DIST_DIR=$($exe.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: GUI startup liveness smoke
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          Remove-Item Env:ALBAZ_LUNAR_RUNTIME_SMOKE -ErrorAction SilentlyContinue
+          $startup = Join-Path $env:TEMP 'ALBAZ_LUNAR_STARTUP_FAILED.txt'
+          Remove-Item $startup -Force -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath $env:EXE_PATH -WorkingDirectory $env:DIST_DIR -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) {
+            if (Test-Path $startup) { Get-Content $startup }
+            throw "GUI EXE exited during 10-second liveness smoke with code $($p.ExitCode)"
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host 'GUI_LIVENESS_SMOKE=PASS'
 
       - name: Create portable Windows package
         working-directory: lunar_build
@@ -231,7 +225,7 @@ jobs:
           Run START_ALBAZ_LUNAR.cmd or ALBAZ_LUNAR_ECLIPSE_ATLAS.exe.
           Python, pip and an Internet connection are NOT required to run the packaged application.
           Scientific engine: JPL DE440 + IERS EOP + Danjon 1.01 lunar-shadow geometry.
-          Release audit: full tests + expanded NASA regression + packaged EXE runtime smoke.
+          Release audit: 64-test suite + expanded NASA regression + packaged runtime smoke + GUI liveness smoke.
           '@ | Set-Content (Join-Path $dist 'README.txt') -Encoding UTF8
           $zip = 'ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip'
           if (Test-Path $zip) { Remove-Item $zip -Force }
