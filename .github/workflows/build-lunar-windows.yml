@@ -60,17 +60,36 @@ jobs:
           }
           [IO.File]::WriteAllBytes('lunar_r2_overlay.zip', [Convert]::FromBase64String($overlayB64))
           $overlayHash = (Get-FileHash lunar_r2_overlay.zip -Algorithm SHA256).Hash.ToLower()
-          if ($overlayHash -ne '72baf250efaf14f0f1e4ce02b295276b9f6248d523cfbcac04cb426fad70cf76') {
-            throw "R2 overlay SHA256 mismatch: $overlayHash"
-          }
+          Write-Host "R2_OVERLAY_ARCHIVE_SHA256=$overlayHash"
           Expand-Archive lunar_r2_overlay.zip -DestinationPath lunar_build -Force
-          $boot = (Get-FileHash lunar_build/lunar_bootstrap.py -Algorithm SHA256).Hash.ToLower()
-          $reg = (Get-FileHash lunar_build/lunar_scientific_regression.py -Algorithm SHA256).Hash.ToLower()
-          if ($boot -ne '4adfc8a6ea0231bf377cfdb8d952a71929c6727d762a70039f2f770a4105e557') { throw "Bootstrap SHA mismatch: $boot" }
-          if ($reg -ne 'c47ace46fd91eeb5c8f541d93b7906f6d4f649b4242ac92db9f722ba3421881e') { throw "Regression SHA mismatch: $reg" }
-          Write-Host "R2_OVERLAY_SHA256=$overlayHash"
-          Write-Host "R2_BOOTSTRAP_SHA256=$boot"
-          Write-Host "R2_REGRESSION_SHA256=$reg"
+
+          $manifest = @{
+            'lunar_main.py' = '481e9490ce072521bd393b6fa4e3b3dd512f51ae17de06295f7dcd3dd57fab0a'
+            'lunar_bootstrap.py' = '4adfc8a6ea0231bf377cfdb8d952a71929c6727d762a70039f2f770a4105e557'
+            'lunar_scientific_regression.py' = 'c47ace46fd91eeb5c8f541d93b7906f6d4f649b4242ac92db9f722ba3421881e'
+            'lunar_release_preflight.py' = 'f33c7df9395e23dbd0234415ae5f1b4374d0bfc50b45e2a581f180d78a4b3257'
+            'lunar_core/solver.py' = '91fb06118ff2237336d5dead3ff5dae90da133a6ca4d4851c91c67da10e25d7c'
+            'lunar_core/time_scales.py' = '0270c6a41b78da247c348f86b14388cf8d4bf35c8c09ef2a8ebf595ee1915bc1'
+            'lunar_core/topocentric.py' = '826d1b651fde38efc3ed90f7fd9919ff01c74e4e7f521641402ef8dd517921d9'
+            'services/lunar_report_builder.py' = '10a78d15de6d8eea454d37f1651254ea485087f967c685eaeca66075557ee781'
+            'scripts/lunar_runtime_smoke.py' = '014c2374d6873f1698b3dfbdfb6da99020045e78d97cc895ebc8b0ce6ab4b7d3'
+            'tests/test_lunar_solver.py' = '4c632279ba946a333e8dfc96db6212301cf1cd7b05c65b7acd575275392a1a6a'
+            'tests/test_lunar_time_scales.py' = 'ce00f78ef475aeef9e8d521a302950e122092d812c071335124c33fb70af5e6b'
+            'tests/test_lunar_services.py' = 'db0560a77bc9433495f2664d36897df63cb1ccf7e505e03ab4104ab3c7c1c471'
+            'tests/test_lunar_ui_contract.py' = '189ecddc67c051bc9a4be4a8b6f20a83cc4a5b32b0a2593358c74eaecdea7d69'
+            'tests/test_lunar_visibility.py' = '65b1b2df078c488b8d364c029babc36253154a15a114dfab729354b6abed19a8'
+            'tests/test_lunar_packaging.py' = '8445aeabbb72ee0f9a9994197524a38d052676ebd918ec8e5c07be41ad69a797'
+            'tests/test_lunar_scientific_regression.py' = 'a513f0e33d65b59fd7f482165cf6c3adcc214f302866cbe586850bb1c653e0e8'
+          }
+          foreach ($rel in $manifest.Keys) {
+            $path = Join-Path 'lunar_build' $rel
+            if (!(Test-Path $path)) { throw "R2 audited file missing: $rel" }
+            $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $manifest[$rel]) {
+              throw "R2 audited SHA mismatch for ${rel}: $actual"
+            }
+          }
+          Write-Host "R2_AUDITED_MANIFEST_OK=$($manifest.Count) files"
 
       - name: Install build dependencies
         working-directory: lunar_build
@@ -115,23 +134,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'NASA map download failed' }
           if ((Get-Item 'assets/images/world_map_premium_clean.png').Length -lt 1MB) { throw 'NASA map asset is unexpectedly small' }
 
-      - name: Run lunar scientific and UI contract tests
+      - name: Run release preflight
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python lunar_release_preflight.py
+          if ($LASTEXITCODE -ne 0) { throw 'Lunar release preflight failed' }
+
+      - name: Run complete lunar test suite
         working-directory: lunar_build
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           $ErrorActionPreference = 'Stop'
-          python -m pytest -q `
-            tests/test_lunar_geometry.py `
-            tests/test_lunar_de440.py `
-            tests/test_lunar_solver.py `
-            tests/test_lunar_time_scales.py `
-            tests/test_lunar_visibility.py `
-            tests/test_lunar_services.py `
-            tests/test_lunar_map_controller.py `
-            tests/test_lunar_ui_contract.py
-          if ($LASTEXITCODE -ne 0) { throw 'Lunar test suite failed' }
+          python -m pytest -q tests
+          if ($LASTEXITCODE -ne 0) { throw 'Complete lunar test suite failed' }
 
       - name: Run expanded DE440 NASA regression
         working-directory: lunar_build
@@ -212,7 +231,7 @@ jobs:
           Run START_ALBAZ_LUNAR.cmd or ALBAZ_LUNAR_ECLIPSE_ATLAS.exe.
           Python, pip and an Internet connection are NOT required to run the packaged application.
           Scientific engine: JPL DE440 + IERS EOP + Danjon 1.01 lunar-shadow geometry.
-          Release audit: expanded NASA regression + packaged EXE runtime smoke required before artifact creation.
+          Release audit: full tests + expanded NASA regression + packaged EXE runtime smoke.
           '@ | Set-Content (Join-Path $dist 'README.txt') -Encoding UTF8
           $zip = 'ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip'
           if (Test-Path $zip) { Remove-Item $zip -Force }
