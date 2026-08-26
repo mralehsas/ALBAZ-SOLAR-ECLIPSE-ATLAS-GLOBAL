@@ -47,22 +47,28 @@ jobs:
           Expand-Archive lunar_source.zip -DestinationPath lunar_build -Force
           if (!(Test-Path 'lunar_build/lunar_main.py')) { throw 'lunar_main.py missing after extraction' }
 
-      - name: Apply audited Lunar R2 overlay
+      - name: Apply exact audited Lunar R2 overlay
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          git apply --directory=lunar_build ci/lunar_r2/main_solver.patch
-          if ($LASTEXITCODE -ne 0) { throw 'main/solver R2 patch failed' }
-          git apply --directory=lunar_build ci/lunar_r2/time_topo.patch
-          if ($LASTEXITCODE -ne 0) { throw 'time/topocentric R2 patch failed' }
-          git apply --directory=lunar_build ci/lunar_r2/runtime_report.patch
-          if ($LASTEXITCODE -ne 0) { throw 'runtime/report R2 patch failed' }
-          python -c "import zlib,base64,pathlib; p=pathlib.Path('ci/lunar_r2/lunar_bootstrap.py.zlib.b64'); pathlib.Path('lunar_build/lunar_bootstrap.py').write_bytes(zlib.decompress(base64.b64decode(p.read_text().strip())))"
-          python -c "import zlib,base64,pathlib; p=pathlib.Path('ci/lunar_r2/lunar_scientific_regression.py.zlib.b64'); pathlib.Path('lunar_build/lunar_scientific_regression.py').write_bytes(zlib.decompress(base64.b64decode(p.read_text().strip())))"
+          $overlayParts = @('part00','part01','part02','part03','part04','part05','part06')
+          $overlayB64 = ''
+          foreach ($name in $overlayParts) {
+            $path = Join-Path 'ci/lunar_r2_exact' $name
+            if (!(Test-Path $path)) { throw "Missing R2 overlay part: $name" }
+            $overlayB64 += Get-Content $path -Raw
+          }
+          [IO.File]::WriteAllBytes('lunar_r2_overlay.zip', [Convert]::FromBase64String($overlayB64))
+          $overlayHash = (Get-FileHash lunar_r2_overlay.zip -Algorithm SHA256).Hash.ToLower()
+          if ($overlayHash -ne '72baf250efaf14f0f1e4ce02b295276b9f6248d523cfbcac04cb426fad70cf76') {
+            throw "R2 overlay SHA256 mismatch: $overlayHash"
+          }
+          Expand-Archive lunar_r2_overlay.zip -DestinationPath lunar_build -Force
           $boot = (Get-FileHash lunar_build/lunar_bootstrap.py -Algorithm SHA256).Hash.ToLower()
           $reg = (Get-FileHash lunar_build/lunar_scientific_regression.py -Algorithm SHA256).Hash.ToLower()
           if ($boot -ne '4adfc8a6ea0231bf377cfdb8d952a71929c6727d762a70039f2f770a4105e557') { throw "Bootstrap SHA mismatch: $boot" }
           if ($reg -ne 'c47ace46fd91eeb5c8f541d93b7906f6d4f649b4242ac92db9f722ba3421881e') { throw "Regression SHA mismatch: $reg" }
+          Write-Host "R2_OVERLAY_SHA256=$overlayHash"
           Write-Host "R2_BOOTSTRAP_SHA256=$boot"
           Write-Host "R2_REGRESSION_SHA256=$reg"
 
