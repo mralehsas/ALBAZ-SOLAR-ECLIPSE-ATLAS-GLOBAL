@@ -1,0 +1,140 @@
+diff --git a/lunar_release_preflight.py b/lunar_release_preflight.py
+new file mode 100644
+index 0000000..372561a
+--- /dev/null
++++ b/lunar_release_preflight.py
+@@ -0,0 +1,134 @@
++from __future__ import annotations
++
++import argparse
++import ast
++import hashlib
++import sqlite3
++import struct
++from pathlib import Path
++
++from lunar_core.de440 import DE440Ephemeris
++from lunar_core.solver import LunarEclipseSolver
++from lunar_core.time_scales import gregorian_to_jd, load_iers_dut1
++
++ROOT = Path(__file__).resolve().parent
++MIN_CITY_COUNT = 100000
++
++
++def sha256(path: Path) -> str:
++    digest = hashlib.sha256()
++    with Path(path).open('rb') as fh:
++        for block in iter(lambda: fh.read(4 * 1024 * 1024), b''):
++            digest.update(block)
++    return digest.hexdigest()
++
++
++def _verify_city_database(path: Path, min_cities: int) -> tuple[int, list[str]]:
++    failures: list[str] = []
++    if not path.is_file():
++        return 0, [f'missing city database: {path.name}']
++    try:
++        con = sqlite3.connect(f'file:{path.as_posix()}?mode=ro', uri=True)
++        try:
++            quick = con.execute('PRAGMA quick_check').fetchone()[0]
++            if quick != 'ok':
++                failures.append(f'SQLite quick_check={quick}')
++            count = int(con.execute('SELECT count(*) FROM cities').fetchone()[0])
++            fts = int(con.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='city_search_fts'").fetchone()[0])
++            spatial = int(con.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='city_spatial_index'").fetchone()[0])
++            if count < min_cities:
++                failures.append(f'city count {count} < {min_cities}')
++            if not fts:
++                failures.append('city_search_fts missing')
++            if not spatial:
++                failures.append('city_spatial_index missing')
++            probe = con.execute("SELECT count(*) FROM cities WHERE country_code='IQ'").fetchone()[0]
++            if not probe:
++                failures.append('Iraq city probe missing')
++            return count, failures
++        finally:
++            con.close()
++    except Exception as exc:
++        return 0, [f'city database error: {exc}']
++
++
++def run_preflight(root: Path = ROOT, min_cities: int = MIN_CITY_COUNT) -> dict:
++    root = Path(root)
++    failures: list[str] = []
++    required = [
++        root / 'lunar_main.py',
++        root / 'data' / 'de440.bsp',
++        root / 'data' / 'finals2000A.all',
++        root / 'data' / 'world_cities.sqlite3',
++        root / 'assets' / 'images' / 'world_map_premium_clean.png',
++    ]
++    for path in required:
++        if not path.is_file() or path.stat().st_size <= 0:
++            failures.append(f'missing/empty required asset: {path.relative_to(root)}')
++
++    main_path = root / 'lunar_main.py'
++    if main_path.is_file():
++        try:
++            ast.parse(main_path.read_text(encoding='utf-8'))
++        except Exception as exc:
++            failures.append(f'lunar_main.py AST invalid: {exc}')
++
++    city_count = 0
++    city_db = root / 'data' / 'world_cities.sqlite3'
++    if city_db.is_file():
++        city_count, db_failures = _verify_city_database(city_db, min_cities)
++        failures.extend(db_failures)
++
++    scientific: dict[str, object] = {}
++    de440_path = root / 'data' / 'de440.bsp'
++    eop_path = root / 'data' / 'finals2000A.all'
++    if de440_path.is_file() and eop_path.is_file():
++        try:
++            ephem = DE440Ephemeris(de440_path)
++            iers = load_iers_dut1(eop_path)
++            solver = LunarEclipseSolver(ephem, iers_table=iers)
++            c0, c1 = ephem.coverage_jd
++            if c0 > gregorian_to_jd(1550, 1, 1):
++                failures.append(f'DE440 starts after 1550-01-01: JD {c0}')
++            if c1 < gregorian_to_jd(2650, 1, 1):
++                failures.append(f'DE440 does not reach 2650-01-01: JD {c1}')
++            events = solver.events_for_year(2026)
++            kinds = {event.eclipse_type.value for event in events}
++            if len(events) != 2 or not {'total', 'partial'}.issubset(kinds):
++                failures.append(f'2026 DE440 regression mismatch: {len(events)} {sorted(kinds)}')
++            scientific = {
++                'de440_sha256': sha256(de440_path),
++                'eop_sha256': sha256(eop_path),
++                'de440_coverage_jd': [c0, c1],
++                'iers_mjd': [iers.start_mjd, iers.end_mjd],
++                'events_2026': len(events),
++                'event_types_2026': sorted(kinds),
++            }
++        except Exception as exc:
++            failures.append(f'scientific preflight error: {type(exc).__name__}: {exc}')
++
++    return {
++        'ok': not failures,
++        'failures': failures,
++        'city_count': city_count,
++        'pointer_bits': struct.calcsize('P') * 8,
++        'certified_year_labels': [1550, 2650],
++        'scientific': scientific,
++    }
++
++
++def main(argv=None) -> int:
++    parser = argparse.ArgumentParser(description='ALBAZ Lunar Eclipse Atlas release preflight')
++    parser.add_argument('--root', type=Path, default=ROOT)
++    parser.add_argument('--min-cities', type=int, default=MIN_CITY_COUNT)
++    ns = parser.parse_args(argv)
++    result = run_preflight(ns.root, ns.min_cities)
++    print('[PASS] ALBAZ LUNAR release preflight' if result['ok'] else '[FAIL] ALBAZ LUNAR release preflight')
++    print(f"  year contract: 1550..2650 | pointer={result['pointer_bits']}-bit | cities={result['city_count']:,}")
++    for item in result['failures']:
++        print('  - ' + item)
++    return 0 if result['ok'] else 1
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())

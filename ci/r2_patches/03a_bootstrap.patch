@@ -1,0 +1,63 @@
+diff --git a/lunar_bootstrap.py b/lunar_bootstrap.py
+new file mode 100644
+index 0000000..b7ab273
+--- /dev/null
++++ b/lunar_bootstrap.py
+@@ -0,0 +1,57 @@
++"""Minimal Windows-safe bootstrap for the compiled ALBAZ Lunar Atlas.
++
++Only Python's standard library is imported before the guarded import of the
++real application.  This lets packaged builds record import-time failures that
++would otherwise disappear when the GUI executable has no console window.
++"""
++from __future__ import annotations
++
++import os
++from pathlib import Path
++import tempfile
++import traceback
++
++SMOKE_ENV = "ALBAZ_LUNAR_RUNTIME_SMOKE"
++SMOKE_FAIL_NAME = "ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt"
++STARTUP_FAIL_NAME = "ALBAZ_LUNAR_STARTUP_FAILED.txt"
++
++
++def _temp_dir() -> Path:
++    return Path(os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir())
++
++
++def _write_failure(text: str) -> Path:
++    name = SMOKE_FAIL_NAME if os.environ.get(SMOKE_ENV) == "1" else STARTUP_FAIL_NAME
++    path = _temp_dir() / name
++    path.write_text(text, encoding="utf-8", errors="replace")
++    return path
++
++
++def _show_windows_error(path: Path) -> None:
++    if os.name != "nt" or os.environ.get(SMOKE_ENV) == "1":
++        return
++    try:
++        import ctypes
++        ctypes.windll.user32.MessageBoxW(
++            0,
++            f"ALBAZ Lunar Eclipse Atlas could not start.\n\nDiagnostic log:\n{path}",
++            "ALBAZ LUNAR ECLIPSE ATLAS - Startup Error",
++            0x10,
++        )
++    except Exception:
++        pass
++
++
++def main() -> int:
++    try:
++        from lunar_main import main as application_main
++        return int(application_main())
++    except BaseException:
++        diagnostic = traceback.format_exc()
++        path = _write_failure(diagnostic)
++        _show_windows_error(path)
++        return 97
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

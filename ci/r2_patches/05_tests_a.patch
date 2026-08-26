@@ -1,0 +1,126 @@
+diff --git a/tests/test_lunar_packaging.py b/tests/test_lunar_packaging.py
+index 8273363..b979891 100644
+--- a/tests/test_lunar_packaging.py
++++ b/tests/test_lunar_packaging.py
+@@ -16,7 +16,7 @@ def test_lunar_release_files_exist():
+ 
+ def test_lunar_builder_uses_lunar_entrypoint_and_release_assets_only():
+     text = (ROOT / 'START_BUILD_LUNAR_9_6_3_FINAL_EXE.cmd').read_text(encoding='utf-8')
+-    assert 'lunar_main.py' in text
++    assert 'lunar_bootstrap.py' in text
+     assert 'ALBAZ_LUNAR_ECLIPSE_ATLAS_9_6_3_TESLA_FINAL.exe' in text
+     assert 'data\\de440.bsp' in text
+     assert 'data\\finals2000A.all' in text
+@@ -135,3 +135,34 @@ def test_windows_builder_accepts_supported_64bit_python_311_to_313():
+     assert 'py -3.12' in text
+     assert 'py -3.13' in text
+     assert 'Python 3.11-3.13 x64' in text
++
++
++def test_packaged_entrypoint_has_stdlib_bootstrap_that_captures_import_time_failures():
++    bootstrap = ROOT / 'lunar_bootstrap.py'
++    assert bootstrap.is_file()
++    body = bootstrap.read_text(encoding='utf-8')
++    assert 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt' in body
++    assert 'traceback.format_exc' in body
++    assert 'from lunar_main import main' in body
++    builder = (ROOT / 'START_BUILD_LUNAR_9_6_3_FINAL_EXE.cmd').read_text(encoding='utf-8')
++    assert 'lunar_bootstrap.py' in builder
++
++
++def test_packaged_resource_root_prefers_actual_executable_directory_and_probes_de440():
++    body = (ROOT / 'lunar_main.py').read_text(encoding='utf-8')
++    assert 'sys.executable' in body
++    assert "root / 'data' / 'de440.bsp'" in body or 'root / "data" / "de440.bsp"' in body
++    assert 'sys._MEIPASS' in body or '_MEIPASS' in body
++
++
++def test_packaged_smoke_captures_child_stdout_and_stderr_for_diagnostics():
++    body = (ROOT / 'scripts' / 'lunar_runtime_smoke.py').read_text(encoding='utf-8')
++    assert 'stdout=subprocess.PIPE' in body
++    assert 'stderr=subprocess.PIPE' in body
++    assert 'communicate' in body
++
++
++def test_windows_release_bundles_iana_tzdata_for_local_civil_times():
++    text = (ROOT / 'START_BUILD_LUNAR_9_6_3_FINAL_EXE.cmd').read_text(encoding='utf-8')
++    assert 'tzdata==2026.3' in text
++    assert '--include-package-data=tzdata' in text
+diff --git a/tests/test_lunar_scientific_regression.py b/tests/test_lunar_scientific_regression.py
+new file mode 100644
+index 0000000..b28e461
+--- /dev/null
++++ b/tests/test_lunar_scientific_regression.py
+@@ -0,0 +1,41 @@
++from lunar_scientific_regression import (
++    NASA_REFERENCES,
++    TIME_TOLERANCE_SECONDS,
++    MAG_TOLERANCE,
++    run_regression,
++)
++
++
++def test_release_regression_spans_2024_through_2030_with_all_catalog_events():
++    assert len(NASA_REFERENCES) == 16
++    assert {r.year for r in NASA_REFERENCES} == set(range(2024, 2031))
++    assert TIME_TOLERANCE_SECONDS <= 60.0
++    assert MAG_TOLERANCE <= 0.002
++
++
++def test_release_regression_is_green_against_nasa_catalog_and_boundaries():
++    result = run_regression()
++    assert result['ok'], result['failures']
++    assert result['max_errors']['greatest_td_seconds'] < 60.0
++    assert result['max_errors']['umbral_magnitude'] < 0.002
++    assert result['max_errors']['penumbral_magnitude'] < 0.002
++    assert result['max_errors']['gamma_er'] < 0.001
++    assert result['max_errors']['moon_zenith_deg'] < 0.75
++    assert result['max_errors']['contact_td_seconds'] < 60.0
++
++
++def test_historical_1550_julian_regression_is_explicitly_gated():
++    result = run_regression()
++    assert result['historical_1550']['count'] == 3
++    assert result['historical_1550']['max_td_error_seconds'] < 60.0
++    assert result['historical_1550']['max_magnitude_error'] < 0.002
++
++
++def test_2026_shadow_geometry_matches_nasa_danjon_figure_at_greatest():
++    result = run_regression()
++    shadow = result['nasa_2026_shadow_geometry']
++    assert shadow['max_angular_error_deg'] < 0.0003
++    assert abs(shadow['penumbral_radius_deg'] - 1.2361) < 0.0003
++    assert abs(shadow['umbral_radius_deg'] - 0.6983) < 0.0003
++    assert abs(shadow['moon_semidiameter_deg'] - (15 + 37.0/60.0)/60.0) < 0.0003
++    assert abs(shadow['sun_semidiameter_deg'] - (16 + 8.0/60.0)/60.0) < 0.0003
+diff --git a/tests/test_lunar_services.py b/tests/test_lunar_services.py
+index 17dc3c5..04bf43f 100644
+--- a/tests/test_lunar_services.py
++++ b/tests/test_lunar_services.py
+@@ -49,3 +49,26 @@ def test_city_report_is_lunar_only_and_lists_global_contacts(tmp_path):
+     assert 'الخسوف' in html
+     assert 'C1' not in html and 'C2' not in html and 'Annular' not in html
+     assert 'Danjon' in html and 'DE440' in html
++
++
++def test_city_report_lists_utc_local_ut1_and_timezone_for_certified_modern_event():
++    from lunar_core.time_scales import load_iers_dut1
++    eph = DE440Ephemeris(Path('data/de440.bsp'))
++    iers = load_iers_dut1(Path('data/finals2000A.all'))
++    event = LunarEclipseSolver(eph, iers_table=iers).events_for_year(2026)[0]
++    result = LunarVisibilityEngine(eph).local_result(event, latitude_deg=40.7128, longitude_deg=-74.0060)
++    report = build_lunar_city_report_html(event, result, _location(), language='en')
++    assert 'UTC' in report
++    assert 'UT1' in report
++    assert 'Local' in report
++    assert 'America/New_York' in report
++    assert '-05:00' in report or '-04:00' in report
++
++
++def test_city_report_historical_event_does_not_fabricate_utc_or_local_time():
++    eph = DE440Ephemeris(Path('data/de440.bsp'))
++    event = LunarEclipseSolver(eph).events_for_year(1550)[0]
++    result = LunarVisibilityEngine(eph).local_result(event, latitude_deg=40.7128, longitude_deg=-74.0060)
++    report = build_lunar_city_report_html(event, result, _location(), language='en')
++    assert 'Julian' in report
++    assert 'UTC/local civil time unavailable' in report
