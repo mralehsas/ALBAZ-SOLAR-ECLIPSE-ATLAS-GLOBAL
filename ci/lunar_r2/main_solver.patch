@@ -1,0 +1,188 @@
+--- a/lunar_main.py
++++ b/lunar_main.py
+@@ -16,7 +16,6 @@
+ import traceback
+ from pathlib import Path
+ import sys
+-from datetime import datetime, timedelta, timezone
+ 
+ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot, QTimer
+ from PySide6.QtGui import QColor, QFont
+@@ -30,7 +29,7 @@
+ 
+ from lunar_core.de440 import DE440Ephemeris
+ from lunar_core.solver import LunarEclipseSolver
+-from lunar_core.time_scales import load_iers_dut1
++from lunar_core.time_scales import format_jd_label, load_iers_dut1, local_time_text
+ from lunar_core.visibility import LunarVisibilityEngine
+ from lunar_ui.cinematic_widget import LunarCinematicWidget
+ from lunar_ui.globe_widget import LunarGlobeWidget
+@@ -50,19 +49,32 @@
+ AUTHOR_BRAND = "ALBAZ ASTROTECH"
+ AUTHOR_AR = "إعداد الفيزيائي عمر الباز – رئيس مبرمجين أقدم – عضو الاتحاد العربي لعلوم الفلك والفضاء"
+ PHASES = ("P1", "U1", "U2", "GREATEST", "U3", "U4", "P4")
+-J2000_JD = 2451545.0
+-J2000 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+-
+-
+ def resource_root() -> Path:
+-    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
++    """Resolve the directory that owns bundled runtime assets.
++
++    Standalone Windows builds must load DE440/IERS/cities next to the actual
++    executable.  Probe concrete candidate directories instead of trusting a
++    single packager-specific attribute, then fall back to the source tree.
++    """
++    candidates: list[Path] = []
++    if "__compiled__" in globals() or getattr(sys, "frozen", False):
++        candidates.append(Path(sys.executable).resolve().parent)
++    if hasattr(sys, "_MEIPASS"):
++        candidates.append(Path(getattr(sys, "_MEIPASS")).resolve())
++    candidates.append(Path(__file__).resolve().parent)
++
++    seen: set[Path] = set()
++    for root in candidates:
++        if root in seen:
++            continue
++        seen.add(root)
++        if (root / "data" / "de440.bsp").is_file():
++            return root
++    return candidates[0]
+ 
+ 
+ def jd_text(jd: float | None, scale: str) -> str:
+-    if jd is None:
+-        return "—"
+-    dt = J2000 + timedelta(days=float(jd) - J2000_JD)
+-    return dt.strftime("%Y-%m-%d %H:%M:%S") + f" {scale}"
++    return format_jd_label(jd, scale)
+ 
+ 
+ def duration_text(seconds: float) -> str:
+@@ -140,7 +152,7 @@
+         signature = LunarEngineSignature(
+             ephemeris_hash=file_sha256(self.de440_path),
+             eop_hash=file_sha256(self.eop_path),
+-            calculation_engine_version="LUNAR-DE440-DANJON-IERS-R1",
++            calculation_engine_version="LUNAR-DE440-DANJON-IERS-R2",
+         )
+         cache = LunarEclipseCache(runtime_cache_dir() / "lunar_eclipse_cache_v9_6_3.sqlite3")
+         self.calculation = LunarCalculationService(self.visibility, cache=cache, signature=signature)
+@@ -354,8 +366,8 @@
+         self.local_summary = QLabel("اختر موقعًا بعد حساب الخسوف.")
+         self.local_summary.setWordWrap(True)
+         ll.addWidget(self.local_summary)
+-        self.local_table = QTableWidget(0, 4)
+-        self.local_table.setHorizontalHeaderLabels(["Phase", "Alt°", "Az°", "Visible"])
++        self.local_table = QTableWidget(0, 5)
++        self.local_table.setHorizontalHeaderLabels(["Phase", "Local time", "Alt°", "Az°", "Visible"])
+         self.local_table.verticalHeader().setVisible(False)
+         self.local_table.setEditTriggers(QTableWidget.NoEditTriggers)
+         self.local_table.horizontalHeader().setStretchLastSection(True)
+@@ -584,7 +596,7 @@
+         name = location.name_ar or location.name_en or "Selected point"
+         country = location.country_name_ar or location.country_name_en or location.country_code
+         self.location_label.setText(
+-            f"{name}\n{country}\nLat {location.latitude:.6f}° • Lon {location.longitude:.6f}° • {location.elevation_m:.1f} m"
++            f"{name}\n{country}\nLat {location.latitude:.6f}° • Lon {location.longitude:.6f}° • {location.elevation_m:.1f} m\nTimezone: {location.timezone if location.timezone_known else 'unknown'}"
+         )
+         self.map_widget.set_selected(location.latitude, location.longitude)
+ 
+@@ -613,12 +625,17 @@
+             self.local_table.insertRow(row)
+             self.local_table.setItem(row, 0, QTableWidgetItem(phase))
+             if state is None:
+-                for col in range(1, 4):
++                for col in range(1, 5):
+                     self.local_table.setItem(row, col, QTableWidgetItem("—"))
+                 continue
+-            self.local_table.setItem(row, 1, QTableWidgetItem(f"{state.moon_alt_deg:.3f}"))
+-            self.local_table.setItem(row, 2, QTableWidgetItem(f"{state.moon_az_deg:.3f}"))
+-            self.local_table.setItem(row, 3, QTableWidgetItem("✓" if state.moon_above_horizon else "✕"))
++            utc_jd = self.current_event.contacts_utc_jd.get(phase)
++            local_text = local_time_text(
++                utc_jd, location.timezone, timezone_known=location.timezone_known
++            )
++            self.local_table.setItem(row, 1, QTableWidgetItem(local_text))
++            self.local_table.setItem(row, 2, QTableWidgetItem(f"{state.moon_alt_deg:.3f}"))
++            self.local_table.setItem(row, 3, QTableWidgetItem(f"{state.moon_az_deg:.3f}"))
++            self.local_table.setItem(row, 4, QTableWidgetItem("✓" if state.moon_above_horizon else "✕"))
+         self.statusBar().showMessage("Local lunar-eclipse visibility calculated — global P/U contacts unchanged")
+ 
+     def reset_map(self):
+--- a/lunar_core/solver.py
++++ b/lunar_core/solver.py
+@@ -1,7 +1,6 @@
+ """Global lunar-eclipse discovery and contact solving from DE440."""
+ from __future__ import annotations
+ 
+-from datetime import datetime, timedelta
+ import math
+ from typing import Callable
+ 
+@@ -12,7 +11,12 @@
+ from .de440 import DE440Ephemeris
+ from .geometry import classify_eclipse, shadow_geometry_from_vectors
+ from .models import LunarEclipseEvent, LunarEclipseType, ShadowGeometry
+-from .time_scales import IERSDUT1Table, best_tt_to_earth_rotation, gregorian_to_jd
++from .time_scales import (
++    IERSDUT1Table,
++    best_tt_to_earth_rotation,
++    historical_calendar_components,
++    historical_year_start_jd,
++)
+ 
+ SECONDS_PER_DAY = 86400.0
+ 
+@@ -59,9 +63,9 @@
+ 
+ 
+ def _month_for_jd(jd: float, year: int) -> int:
+-    jan1 = gregorian_to_jd(year, 1, 1)
+-    dt = datetime(year, 1, 1) + timedelta(days=float(jd) - jan1)
+-    return dt.month
++    # Use the same historical calendar convention as the public year selector:
++    # Julian before the 1582 reform, Gregorian afterwards.
++    return int(historical_calendar_components(float(jd))[1])
+ 
+ 
+ class LunarEclipseSolver:
+@@ -81,9 +85,16 @@
+         except ValueError:
+             return math.pi
+ 
++    def _axis_distance_objective(self, jd_tdb: float) -> float:
++        """Linear Moon-to-umbra-axis distance used to define greatest eclipse."""
++        try:
++            return self.geometry_at(jd_tdb).axis_distance_km
++        except ValueError:
++            return math.inf
++
+     def _candidate_minima(self, year: int) -> list[float]:
+-        start = gregorian_to_jd(year, 1, 1) - 2.0
+-        end = gregorian_to_jd(year + 1, 1, 1) + 2.0
++        start = historical_year_start_jd(year) - 2.0
++        end = historical_year_start_jd(year + 1) + 2.0
+         # Six-hour cadence robustly brackets the single anti-solar minimum per lunation.
+         grid = np.arange(start, end + 0.250001, 0.25, dtype=float)
+         values = np.asarray([self._gamma_objective(float(jd)) for jd in grid])
+@@ -100,7 +111,7 @@
+                 center = float(grid[i])
+                 half = float(grid[i + 1] - grid[i])
+                 result = minimize_scalar(
+-                    lambda offset: self._gamma_objective(center + float(offset)),
++                    lambda offset: self._axis_distance_objective(center + float(offset)),
+                     bounds=(-half, half),
+                     method="bounded",
+                     options={"xatol": 1e-10, "maxiter": 100},
+@@ -201,8 +212,8 @@
+         if y < DE440_START_YEAR or y > DE440_END_YEAR:
+             raise ValueError(f"Certified DE440 lunar range is {DE440_START_YEAR}..{DE440_END_YEAR}")
+         result: list[LunarEclipseEvent] = []
+-        start = gregorian_to_jd(y, 1, 1)
+-        end = gregorian_to_jd(y + 1, 1, 1)
++        start = historical_year_start_jd(y)
++        end = historical_year_start_jd(y + 1)
+         for jd in self._candidate_minima(y):
+             if not (start <= jd < end):
+                 continue
