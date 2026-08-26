@@ -12,7 +12,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 90
-
     steps:
       - name: Checkout build branch
         uses: actions/checkout@v4
@@ -23,21 +22,67 @@ jobs:
           python-version: '3.12'
           architecture: 'x64'
 
-      - name: Verify exact audited R2 source
+      - name: Reconstruct stable base and apply audited R2 patches
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $src = 'ci/lunar_ci_source_r2.zip'
-          if (!(Test-Path $src)) { throw 'Exact audited R2 ZIP is missing' }
-          $hash = (Get-FileHash $src -Algorithm SHA256).Hash.ToLower()
-          Write-Host "R2_SOURCE_SHA256=$hash"
-          if ($hash -ne 'b84df5ed9f546759f8b7a75587fe55c4ad5e1dad93d5298207d40164c342ec8f') {
-            throw "Exact audited R2 SHA256 mismatch: $hash"
+          $partNames = @('part00','part01','part02','part03','part04','part05a','part05b','part05c','part05d','part06a','part06b','part06c','part06d','part07')
+          $b64 = ''
+          foreach ($name in $partNames) {
+            $path = Join-Path 'ci/lunar_parts' $name
+            if (!(Test-Path $path)) { throw "Missing stable base part: $name" }
+            $b64 += Get-Content $path -Raw
           }
+          [IO.File]::WriteAllBytes('lunar_source.zip', [Convert]::FromBase64String($b64))
+          $baseHash = (Get-FileHash lunar_source.zip -Algorithm SHA256).Hash.ToLower()
+          if ($baseHash -ne '8930212d431799e6aa0f78efce90bf72998a2494d1a3ce5f4028581dfa46e062') { throw "Stable base SHA mismatch: $baseHash" }
           if (Test-Path lunar_build) { Remove-Item lunar_build -Recurse -Force }
-          Expand-Archive $src -DestinationPath lunar_build -Force
-          if (!(Test-Path 'lunar_build/lunar_bootstrap.py')) { throw 'lunar_bootstrap.py missing from R2 source' }
-          if (!(Test-Path 'lunar_build/lunar_main.py')) { throw 'lunar_main.py missing from R2 source' }
+          Expand-Archive lunar_source.zip -DestinationPath lunar_build -Force
+
+          $patchManifest = @{
+            '01_main.patch'='8a9b580a4ed67fe6d54b31bf3c541ecb9f724d585e193f8ea0b72beeaa6424fd'
+            '02_core.patch'='54a1721a0c16b72ccf66b907872fa1d3f05185ec1d55cb31438610d660fdee89'
+            '03a_bootstrap.patch'='b5eef1c93220f66f9b4963b4fc531dea5faf7b4ad293e3e181462421ddcb0246'
+            '03b_preflight.patch'='bab1e0f84717531da53740b0c8f1830f1e834fb26adcad7a68e104c5ff568ccc'
+            '03c_regression.patch'='d4bfb6b2c5386d718e3b328bd2f1ff71ff1534ad376342663eb28cb313219668'
+            '04_runtime.patch'='38408830bd690bba1eee8b772687fc14ba34cc01251dc51f03fa3f2ddaa3014c'
+            '05_tests_a.patch'='8d8cd176e3a1ff2d3ebce01084095a2027292a3e05fa1fe4c5fbc4d336bac4d4'
+            '06_tests_b.patch'='2873c4bcba881e83556e12841bb1f7b6cf01f716aa4e2f528b135b16407943cc'
+          }
+          foreach ($name in @('01_main.patch','02_core.patch','03a_bootstrap.patch','03b_preflight.patch','03c_regression.patch','04_runtime.patch','05_tests_a.patch','06_tests_b.patch')) {
+            $p = Join-Path 'ci/r2_patches' $name
+            if (!(Test-Path $p)) { throw "Missing R2 patch: $name" }
+            $actual = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $patchManifest[$name]) { throw "R2 patch SHA mismatch for ${name}: $actual" }
+            git apply --directory=lunar_build $p
+            if ($LASTEXITCODE -ne 0) { throw "R2 patch failed: $name" }
+          }
+
+          $manifest = @{
+            'lunar_main.py'='481e9490ce072521bd393b6fa4e3b3dd512f51ae17de06295f7dcd3dd57fab0a'
+            'lunar_bootstrap.py'='4adfc8a6ea0231bf377cfdb8d952a71929c6727d762a70039f2f770a4105e557'
+            'lunar_release_preflight.py'='f33c7df9395e23dbd0234415ae5f1b4374d0bfc50b45e2a581f180d78a4b3257'
+            'lunar_scientific_regression.py'='c47ace46fd91eeb5c8f541d93b7906f6d4f649b4242ac92db9f722ba3421881e'
+            'lunar_core/solver.py'='91fb06118ff2237336d5dead3ff5dae90da133a6ca4d4851c91c67da10e25d7c'
+            'lunar_core/time_scales.py'='0270c6a41b78da247c348f86b14388cf8d4bf35c8c09ef2a8ebf595ee1915bc1'
+            'lunar_core/topocentric.py'='826d1b651fde38efc3ed90f7fd9919ff01c74e4e7f521641402ef8dd517921d9'
+            'scripts/lunar_runtime_smoke.py'='014c2374d6873f1698b3dfbdfb6da99020045e78d97cc895ebc8b0ce6ab4b7d3'
+            'services/lunar_report_builder.py'='10a78d15de6d8eea454d37f1651254ea485087f967c685eaeca66075557ee781'
+            'tests/test_lunar_packaging.py'='8445aeabbb72ee0f9a9994197524a38d052676ebd918ec8e5c07be41ad69a797'
+            'tests/test_lunar_scientific_regression.py'='a513f0e33d65b59fd7f482165cf6c3adcc214f302866cbe586850bb1c653e0e8'
+            'tests/test_lunar_services.py'='db0560a77bc9433495f2664d36897df63cb1ccf7e505e03ab4104ab3c7c1c471'
+            'tests/test_lunar_solver.py'='4c632279ba946a333e8dfc96db6212301cf1cd7b05c65b7acd575275392a1a6a'
+            'tests/test_lunar_time_scales.py'='ce00f78ef475aeef9e8d521a302950e122092d812c071335124c33fb70af5e6b'
+            'tests/test_lunar_ui_contract.py'='189ecddc67c051bc9a4be4a8b6f20a83cc4a5b32b0a2593358c74eaecdea7d69'
+            'tests/test_lunar_visibility.py'='65b1b2df078c488b8d364c029babc36253154a15a114dfab729354b6abed19a8'
+          }
+          foreach ($rel in $manifest.Keys) {
+            $p = Join-Path 'lunar_build' $rel
+            if (!(Test-Path $p)) { throw "R2 audited file missing: $rel" }
+            $actual = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $manifest[$rel]) { throw "R2 audited file SHA mismatch for ${rel}: $actual" }
+          }
+          Write-Host "R2_AUDITED_FILES=16/16"
 
       - name: Install build dependencies
         working-directory: lunar_build
@@ -54,13 +99,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force data | Out-Null
           curl.exe -L --retry 5 --retry-delay 3 --fail "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp" -o "data/de440.bsp"
-          if ($LASTEXITCODE -ne 0) { throw 'DE440 download failed' }
           curl.exe -L --retry 5 --retry-delay 3 --fail "https://maia.usno.navy.mil/ser7/finals2000A.all" -o "data/finals2000A.all"
-          if ($LASTEXITCODE -ne 0) { throw 'IERS download failed' }
-          if ((Get-Item 'data/de440.bsp').Length -ne 119799808) { throw "Unexpected DE440 byte size: $((Get-Item 'data/de440.bsp').Length)" }
-          if ((Get-Item 'data/finals2000A.all').Length -lt 1MB) { throw 'IERS file is unexpectedly small' }
-          Write-Host "DE440 bytes=$((Get-Item 'data/de440.bsp').Length)"
-          Write-Host "IERS bytes=$((Get-Item 'data/finals2000A.all').Length)"
+          if ((Get-Item 'data/de440.bsp').Length -ne 119799808) { throw 'DE440 byte-size mismatch' }
+          if ((Get-Item 'data/finals2000A.all').Length -lt 1MB) { throw 'IERS file unexpectedly small' }
 
       - name: Build full GeoNames city database
         working-directory: lunar_build
@@ -70,7 +111,6 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
           python scripts/fetch_geonames_lunar.py --cache-dir .geonames-cache --output data/world_cities.sqlite3
           if ($LASTEXITCODE -ne 0) { throw 'GeoNames database build failed' }
-          if (!(Test-Path 'data/world_cities.sqlite3')) { throw 'City database not created' }
 
       - name: Download NASA world map asset
         working-directory: lunar_build
@@ -79,131 +119,91 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force assets/images | Out-Null
           curl.exe -L --retry 5 --retry-delay 3 --fail "https://svs.gsfc.nasa.gov/vis/a000000/a002900/a002915/bluemarble-2048.png" -o "assets/images/world_map_premium_clean.png"
-          if ($LASTEXITCODE -ne 0) { throw 'NASA map download failed' }
-          if ((Get-Item 'assets/images/world_map_premium_clean.png').Length -lt 1MB) { throw 'NASA map asset is unexpectedly small' }
+          if ((Get-Item 'assets/images/world_map_premium_clean.png').Length -lt 1MB) { throw 'NASA map asset unexpectedly small' }
 
       - name: Run release preflight
         working-directory: lunar_build
         shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
+        env: { QT_QPA_PLATFORM: offscreen }
         run: |
-          $ErrorActionPreference = 'Stop'
           python lunar_release_preflight.py
-          if ($LASTEXITCODE -ne 0) { throw 'Lunar release preflight failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed' }
 
       - name: Run complete lunar test suite
         working-directory: lunar_build
         shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
+        env: { QT_QPA_PLATFORM: offscreen }
         run: |
-          $ErrorActionPreference = 'Stop'
           python -m pytest -q tests
-          if ($LASTEXITCODE -ne 0) { throw 'Complete lunar test suite failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Complete lunar tests failed' }
 
       - name: Run expanded DE440 NASA regression
         working-directory: lunar_build
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           python lunar_scientific_regression.py
-          if ($LASTEXITCODE -ne 0) { throw 'Expanded lunar scientific regression failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Scientific regression failed' }
 
-      - name: Source runtime smoke test through bootstrap
+      - name: Source runtime smoke through bootstrap
         working-directory: lunar_build
         shell: pwsh
+        env: { QT_QPA_PLATFORM: offscreen, ALBAZ_LUNAR_RUNTIME_SMOKE: '1' }
         run: |
-          $ErrorActionPreference = 'Stop'
-          $env:QT_QPA_PLATFORM = 'offscreen'
-          $env:ALBAZ_LUNAR_RUNTIME_SMOKE = '1'
           $ok = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_OK.json'
           $fail = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt'
           Remove-Item $ok,$fail -Force -ErrorAction SilentlyContinue
           python lunar_bootstrap.py
-          if ($LASTEXITCODE -ne 0) {
-            if (Test-Path $fail) { Get-Content $fail }
-            throw "Source runtime smoke failed with code $LASTEXITCODE"
-          }
-          if (!(Test-Path $ok)) { throw 'Source runtime smoke success marker missing' }
+          if ($LASTEXITCODE -ne 0) { if (Test-Path $fail) { Get-Content $fail }; throw 'Source bootstrap smoke failed' }
+          if (!(Test-Path $ok)) { throw 'Source smoke success marker missing' }
           Get-Content $ok
 
       - name: Build standalone Windows EXE with Nuitka
         working-directory: lunar_build
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          python -m nuitka `
-            --standalone `
-            --assume-yes-for-downloads `
-            --enable-plugin=pyside6 `
-            --msvc=latest `
-            --windows-console-mode=disable `
-            --output-dir=dist `
-            --output-filename=ALBAZ_LUNAR_ECLIPSE_ATLAS.exe `
-            --include-data-dir=assets=assets `
-            --include-package-data=tzdata `
-            --include-data-file=data/de440.bsp=data/de440.bsp `
-            --include-data-file=data/finals2000A.all=data/finals2000A.all `
-            --include-data-file=data/world_cities.sqlite3=data/world_cities.sqlite3 `
-            lunar_bootstrap.py
+          python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=pyside6 --msvc=latest --windows-console-mode=disable --output-dir=dist --output-filename=ALBAZ_LUNAR_ECLIPSE_ATLAS.exe --include-data-dir=assets=assets --include-package-data=tzdata --include-data-file=data/de440.bsp=data/de440.bsp --include-data-file=data/finals2000A.all=data/finals2000A.all --include-data-file=data/world_cities.sqlite3=data/world_cities.sqlite3 lunar_bootstrap.py
           if ($LASTEXITCODE -ne 0) { throw 'Nuitka build failed' }
 
       - name: Verify packaged runtime contents
         working-directory: lunar_build
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $dist = Get-ChildItem -Path dist -Directory -Filter '*.dist' | Select-Object -First 1
-          if (!$dist) { throw 'Nuitka standalone dist directory missing' }
+          $dist = Get-ChildItem dist -Directory -Filter '*.dist' | Select-Object -First 1
+          if (!$dist) { throw 'Standalone dist missing' }
           $exe = Join-Path $dist.FullName 'ALBAZ_LUNAR_ECLIPSE_ATLAS.exe'
           if (!(Test-Path $exe)) { throw 'Packaged EXE missing' }
-          if (!(Test-Path (Join-Path $dist.FullName 'data/de440.bsp'))) { throw 'Packaged DE440 missing' }
-          if ((Get-Item (Join-Path $dist.FullName 'data/de440.bsp')).Length -ne 119799808) { throw 'Packaged DE440 size mismatch' }
-          if (!(Test-Path (Join-Path $dist.FullName 'data/finals2000A.all'))) { throw 'Packaged IERS missing' }
-          if (!(Test-Path (Join-Path $dist.FullName 'data/world_cities.sqlite3'))) { throw 'Packaged cities DB missing' }
-          Write-Host "PACKAGED_DIST=$($dist.FullName)"
+          foreach ($rel in @('data/de440.bsp','data/finals2000A.all','data/world_cities.sqlite3')) { if (!(Test-Path (Join-Path $dist.FullName $rel))) { throw "Packaged asset missing: $rel" } }
+          if ((Get-Item (Join-Path $dist.FullName 'data/de440.bsp')).Length -ne 119799808) { throw 'Packaged DE440 mismatch' }
+          "EXE_PATH=$exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "DIST_DIR=$($dist.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Smoke-test the actual packaged EXE
+      - name: Smoke-test actual packaged EXE without Python on child PATH
         working-directory: lunar_build
         shell: pwsh
+        env: { QT_QPA_PLATFORM: offscreen }
         run: |
-          $ErrorActionPreference = 'Stop'
-          $env:QT_QPA_PLATFORM = 'offscreen'
-          $exe = Get-ChildItem -Path dist -Recurse -Filter 'ALBAZ_LUNAR_ECLIPSE_ATLAS.exe' | Select-Object -First 1
-          if (!$exe) { throw 'Packaged EXE not found' }
-          Write-Host "Testing EXE: $($exe.FullName)"
           $pythonExe = (Get-Command python).Source
           $savedPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-          & $pythonExe scripts/lunar_runtime_smoke.py "$($exe.FullName)" --timeout 180
-          $smokeCode = $LASTEXITCODE
+          & $pythonExe scripts/lunar_runtime_smoke.py "$env:EXE_PATH" --timeout 180
+          $code = $LASTEXITCODE
           $env:PATH = $savedPath
-          if ($smokeCode -ne 0) {
-            $startup = Join-Path $env:TEMP 'ALBAZ_LUNAR_STARTUP_FAILED.txt'
-            $runtime = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt'
-            if (Test-Path $startup) { Get-Content $startup }
-            if (Test-Path $runtime) { Get-Content $runtime }
-            throw "Packaged EXE runtime smoke failed with code $smokeCode"
+          if ($code -ne 0) {
+            foreach ($n in @('ALBAZ_LUNAR_STARTUP_FAILED.txt','ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt')) { $p=Join-Path $env:TEMP $n; if (Test-Path $p) { Get-Content $p } }
+            throw "Packaged EXE smoke failed: $code"
           }
-          "EXE_PATH=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "DIST_DIR=$($exe.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: GUI startup liveness smoke
         working-directory: lunar_build
         shell: pwsh
+        env: { QT_QPA_PLATFORM: offscreen }
         run: |
-          $ErrorActionPreference = 'Stop'
-          $env:QT_QPA_PLATFORM = 'offscreen'
           Remove-Item Env:ALBAZ_LUNAR_RUNTIME_SMOKE -ErrorAction SilentlyContinue
           $startup = Join-Path $env:TEMP 'ALBAZ_LUNAR_STARTUP_FAILED.txt'
           Remove-Item $startup -Force -ErrorAction SilentlyContinue
           $p = Start-Process -FilePath $env:EXE_PATH -WorkingDirectory $env:DIST_DIR -PassThru
           Start-Sleep -Seconds 10
-          if ($p.HasExited) {
-            if (Test-Path $startup) { Get-Content $startup }
-            throw "GUI EXE exited during 10-second liveness smoke with code $($p.ExitCode)"
-          }
+          if ($p.HasExited) { if (Test-Path $startup) { Get-Content $startup }; throw "GUI exited early: $($p.ExitCode)" }
           Stop-Process -Id $p.Id -Force
           Write-Host 'GUI_LIVENESS_SMOKE=PASS'
 
@@ -211,29 +211,20 @@ jobs:
         working-directory: lunar_build
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          if (!(Test-Path $env:EXE_PATH)) { throw 'Verified EXE path missing' }
           $dist = $env:DIST_DIR
-          @'
-          @echo off
-          cd /d "%~dp0"
-          start "" "ALBAZ_LUNAR_ECLIPSE_ATLAS.exe"
-          '@ | Set-Content (Join-Path $dist 'START_ALBAZ_LUNAR.cmd') -Encoding ASCII
+          "@echo off`r`ncd /d `"%~dp0`"`r`nstart `"`" `"ALBAZ_LUNAR_ECLIPSE_ATLAS.exe`"" | Set-Content (Join-Path $dist 'START_ALBAZ_LUNAR.cmd') -Encoding ASCII
           @'
           ALBAZ LUNAR ECLIPSE ATLAS v9.6.3 TESLA FINAL
           Windows x64 Portable / Offline runtime.
-          Run START_ALBAZ_LUNAR.cmd or ALBAZ_LUNAR_ECLIPSE_ATLAS.exe.
-          Python, pip and an Internet connection are NOT required to run the packaged application.
-          Scientific engine: JPL DE440 + IERS EOP + Danjon 1.01 lunar-shadow geometry.
-          Release audit: 64-test suite + expanded NASA regression + packaged runtime smoke + GUI liveness smoke.
+          Python, pip and Internet are not required at runtime.
+          Scientific engine: JPL DE440 + IERS EOP + Danjon 1.01.
+          Release gates: R2 SHA manifest + full tests + expanded NASA regression + packaged runtime smoke + GUI liveness.
           '@ | Set-Content (Join-Path $dist 'README.txt') -Encoding UTF8
-          $zip = 'ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip'
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path "$dist\*" -DestinationPath $zip -CompressionLevel Optimal
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          $zip='ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip'
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -CompressionLevel Optimal -Force
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           "$hash  $zip" | Set-Content "$zip.sha256" -Encoding ASCII
-          Write-Host "portable_sha256=$hash"
-          Get-Item $zip | Format-List Name,Length,FullName
+          Write-Host "PORTABLE_SHA256=$hash"
 
       - name: Upload verified Windows portable artifact
         uses: actions/upload-artifact@v4
