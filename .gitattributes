@@ -1,1 +1,2 @@
 ci/r2_patches/*.patch -text
+lunar_build/** -text
