@@ -47,13 +47,32 @@ jobs:
           Expand-Archive lunar_source.zip -DestinationPath lunar_build -Force
           if (!(Test-Path 'lunar_build/lunar_main.py')) { throw 'lunar_main.py missing after extraction' }
 
+      - name: Apply audited Lunar R2 overlay
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git apply --directory=lunar_build ci/lunar_r2/main_solver.patch
+          if ($LASTEXITCODE -ne 0) { throw 'main/solver R2 patch failed' }
+          git apply --directory=lunar_build ci/lunar_r2/time_topo.patch
+          if ($LASTEXITCODE -ne 0) { throw 'time/topocentric R2 patch failed' }
+          git apply --directory=lunar_build ci/lunar_r2/runtime_report.patch
+          if ($LASTEXITCODE -ne 0) { throw 'runtime/report R2 patch failed' }
+          python -c "import zlib,base64,pathlib; p=pathlib.Path('ci/lunar_r2/lunar_bootstrap.py.zlib.b64'); pathlib.Path('lunar_build/lunar_bootstrap.py').write_bytes(zlib.decompress(base64.b64decode(p.read_text().strip())))"
+          python -c "import zlib,base64,pathlib; p=pathlib.Path('ci/lunar_r2/lunar_scientific_regression.py.zlib.b64'); pathlib.Path('lunar_build/lunar_scientific_regression.py').write_bytes(zlib.decompress(base64.b64decode(p.read_text().strip())))"
+          $boot = (Get-FileHash lunar_build/lunar_bootstrap.py -Algorithm SHA256).Hash.ToLower()
+          $reg = (Get-FileHash lunar_build/lunar_scientific_regression.py -Algorithm SHA256).Hash.ToLower()
+          if ($boot -ne '4adfc8a6ea0231bf377cfdb8d952a71929c6727d762a70039f2f770a4105e557') { throw "Bootstrap SHA mismatch: $boot" }
+          if ($reg -ne 'c47ace46fd91eeb5c8f541d93b7906f6d4f649b4242ac92db9f722ba3421881e') { throw "Regression SHA mismatch: $reg" }
+          Write-Host "R2_BOOTSTRAP_SHA256=$boot"
+          Write-Host "R2_REGRESSION_SHA256=$reg"
+
       - name: Install build dependencies
         working-directory: lunar_build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           python -m pip install --upgrade pip
-          python -m pip install numpy scipy PySide6 pytest nuitka ordered-set zstandard
+          python -m pip install numpy scipy PySide6 pytest nuitka ordered-set zstandard tzdata==2026.3
 
       - name: Download official DE440 and IERS data
         working-directory: lunar_build
@@ -108,7 +127,15 @@ jobs:
             tests/test_lunar_ui_contract.py
           if ($LASTEXITCODE -ne 0) { throw 'Lunar test suite failed' }
 
-      - name: Source runtime smoke test
+      - name: Run expanded DE440 NASA regression
+        working-directory: lunar_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python lunar_scientific_regression.py
+          if ($LASTEXITCODE -ne 0) { throw 'Expanded lunar scientific regression failed' }
+
+      - name: Source runtime smoke test through bootstrap
         working-directory: lunar_build
         shell: pwsh
         run: |
@@ -116,9 +143,9 @@ jobs:
           $env:QT_QPA_PLATFORM = 'offscreen'
           $env:ALBAZ_LUNAR_RUNTIME_SMOKE = '1'
           $ok = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_OK.json'
-          $fail = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAIL.txt'
+          $fail = Join-Path $env:TEMP 'ALBAZ_LUNAR_RUNTIME_SMOKE_FAILED.txt'
           Remove-Item $ok,$fail -Force -ErrorAction SilentlyContinue
-          python lunar_main.py
+          python lunar_bootstrap.py
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path $fail) { Get-Content $fail }
             throw "Source runtime smoke failed with code $LASTEXITCODE"
@@ -140,10 +167,11 @@ jobs:
             --output-dir=dist `
             --output-filename=ALBAZ_LUNAR_ECLIPSE_ATLAS.exe `
             --include-data-dir=assets=assets `
+            --include-package-data=tzdata `
             --include-data-file=data/de440.bsp=data/de440.bsp `
             --include-data-file=data/finals2000A.all=data/finals2000A.all `
             --include-data-file=data/world_cities.sqlite3=data/world_cities.sqlite3 `
-            lunar_main.py
+            lunar_bootstrap.py
           if ($LASTEXITCODE -ne 0) { throw 'Nuitka build failed' }
 
       - name: Smoke-test the actual packaged EXE
@@ -177,7 +205,8 @@ jobs:
           Windows x64 Portable / Offline runtime.
           Run START_ALBAZ_LUNAR.cmd or ALBAZ_LUNAR_ECLIPSE_ATLAS.exe.
           Python, pip and an Internet connection are NOT required to run the packaged application.
-          Scientific engine: JPL DE440 + IERS EOP + Danjon lunar-shadow geometry.
+          Scientific engine: JPL DE440 + IERS EOP + Danjon 1.01 lunar-shadow geometry.
+          Release audit: expanded NASA regression + packaged EXE runtime smoke required before artifact creation.
           '@ | Set-Content (Join-Path $dist 'README.txt') -Encoding UTF8
           $zip = 'ALBAZ_LUNAR_ECLIPSE_ATLAS_v9.6.3_TESLA_FINAL_WINDOWS_x64_PORTABLE.zip'
           if (Test-Path $zip) { Remove-Item $zip -Force }
