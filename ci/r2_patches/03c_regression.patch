@@ -1,0 +1,341 @@
+diff --git a/lunar_scientific_regression.py b/lunar_scientific_regression.py
+new file mode 100644
+index 0000000..d0a8771
+--- /dev/null
++++ b/lunar_scientific_regression.py
+@@ -0,0 +1,335 @@
++from __future__ import annotations
++
++"""Independent release regression for the DE440 lunar-eclipse engine.
++
++NASA/GSFC Five Millennium Catalog values are external regression references,
++not production inputs.  ALBAZ evaluates JPL DE440 directly with Danjon 1.01,
++so sub-minute TD and ~1e-3 magnitude differences from the older VSOP87/ELP
++catalog are expected and explicitly bounded here.
++"""
++
++from dataclasses import dataclass
++from pathlib import Path
++
++from lunar_core.de440 import DE440Ephemeris
++from lunar_core.solver import LunarEclipseSolver
++from lunar_core.time_scales import gregorian_to_jd, julian_to_jd, load_iers_dut1
++from lunar_core.topocentric import moon_geocentric_subpoint_deg
++
++ROOT = Path(__file__).resolve().parent
++SECONDS_PER_DAY = 86400.0
++TIME_TOLERANCE_SECONDS = 60.0
++MAG_TOLERANCE = 0.0020
++GAMMA_TOLERANCE_ER = 0.0010
++DURATION_TOLERANCE_SECONDS = 30.0
++BOUNDARY_PENUMBRAL_DURATION_TOLERANCE_SECONDS = 180.0
++
++
++@dataclass(frozen=True)
++class NASAReference:
++    year: int
++    month: int
++    day: int
++    hour: int
++    minute: int
++    second: float
++    eclipse_type: str
++    gamma_abs_er: float
++    penumbral_magnitude: float
++    umbral_magnitude: float
++    penumbral_duration_min: float
++    partial_duration_min: float | None = None
++    total_duration_min: float | None = None
++
++    @property
++    def greatest_td_jd(self) -> float:
++        return gregorian_to_jd(
++            self.year, self.month, self.day,
++            self.hour, self.minute, self.second,
++        )
++
++
++# NASA/GSFC Five Millennium Catalog of Lunar Eclipses, 2001-2100 (TD).
++# The signs of NASA gamma identify north/south passage; the current public
++# ALBAZ event model stores the absolute axis distance, so regression uses |gamma|.
++NASA_REFERENCES = (
++    NASAReference(2024, 3, 25, 7, 13, 59, 'penumbral', 1.0609, 0.9557, -0.1325, 279.1),
++    NASAReference(2024, 9, 18, 2, 45, 25, 'partial', 0.9792, 1.0372, 0.0848, 246.3, 62.8),
++    NASAReference(2025, 3, 14, 6, 59, 56, 'total', 0.3484, 2.2595, 1.1784, 362.6, 218.3, 65.4),
++    NASAReference(2025, 9, 7, 18, 12, 58, 'total', 0.2752, 2.3440, 1.3619, 326.7, 209.4, 82.1),
++    NASAReference(2026, 3, 3, 11, 34, 52, 'total', 0.3765, 2.1838, 1.1507, 338.6, 207.2, 58.3),
++    NASAReference(2026, 8, 28, 4, 14, 4, 'partial', 0.4964, 1.9645, 0.9299, 337.8, 198.1),
++    NASAReference(2027, 2, 20, 23, 14, 6, 'penumbral', 1.0480, 0.9266, -0.0569, 241.0),
++    NASAReference(2027, 7, 18, 16, 4, 9, 'penumbral', 1.5758, 0.0014, -1.0680, 11.8),
++    NASAReference(2027, 8, 17, 7, 14, 59, 'penumbral', 1.2797, 0.5456, -0.5254, 218.6),
++    NASAReference(2028, 1, 12, 4, 14, 13, 'partial', 0.9817, 1.0468, 0.0662, 250.7, 56.0),
++    NASAReference(2028, 7, 6, 18, 20, 57, 'partial', 0.7903, 1.4266, 0.3892, 310.6, 141.5),
++    NASAReference(2028, 12, 31, 16, 53, 15, 'total', 0.3258, 2.2742, 1.2463, 336.2, 208.8, 71.3),
++    NASAReference(2029, 6, 26, 3, 23, 22, 'total', 0.0124, 2.8266, 1.8436, 335.1, 219.5, 101.9),
++    NASAReference(2029, 12, 20, 22, 43, 12, 'total', 0.3811, 2.2008, 1.1174, 358.0, 213.3, 53.7),
++    NASAReference(2030, 6, 15, 18, 34, 34, 'partial', 0.7534, 1.4480, 0.5025, 278.2, 144.4),
++    NASAReference(2030, 12, 9, 22, 28, 51, 'penumbral', 1.0731, 0.9416, -0.1628, 279.2),
++)
++
++EXPECTED_COUNTS = {2024: 2, 2025: 2, 2026: 2, 2027: 3, 2028: 3, 2029: 2, 2030: 2}
++
++# NASA catalog coordinates are rounded to whole degrees. Longitudes east are
++# positive and west are negative here.
++NASA_ZENITH_DEG = {
++    (2024, 3, 25): (-1.0, -106.0),
++    (2024, 9, 18): (-3.0, -42.0),
++    (2025, 3, 14): (3.0, -102.0),
++    (2025, 9, 7): (-6.0, 87.0),
++    (2026, 3, 3): (6.0, -171.0),
++    (2026, 8, 28): (-9.0, -63.0),
++    (2027, 2, 20): (10.0, 15.0),
++    (2027, 7, 18): (-22.0, 121.0),
++    (2027, 8, 17): (-12.0, -108.0),
++    (2028, 1, 12): (23.0, -61.0),
++    (2028, 7, 6): (-23.0, 86.0),
++    (2028, 12, 31): (23.0, 108.0),
++    (2029, 6, 26): (-23.0, -50.0),
++    (2029, 12, 20): (23.0, 19.0),
++    (2030, 6, 15): (-23.0, 82.0),
++    (2030, 12, 9): (22.0, 21.0),
++}
++
++# Exact phase contacts on the NASA 2026 Mar 03 figure are printed in UT,
++# with Delta-T rounded to 75 s.  Convert them back to TD for a direct
++# contact-root regression against the DE440 TDB~TT event epochs.
++NASA_2026_CONTACTS_UT = {
++    'P1': (8, 44, 22),
++    'U1': (9, 50, 0),
++    'U2': (11, 4, 26),
++    'U3': (12, 2, 45),
++    'U4': (13, 17, 10),
++    'P4': (14, 22, 59),
++}
++NASA_2026_FIGURE_DELTA_T_SECONDS = 75.0
++CONTACT_TIME_TOLERANCE_SECONDS = 60.0
++
++# NASA's pre-1582 catalog is Julian-calendar dated. These three tiny/ordinary
++# penumbral cases make an effective deep-time calendar + DE440 regression.
++NASA_1550_JULIAN_REFERENCES = (
++    ((1550, 3, 3, 3, 31, 35), 'penumbral', 0.8771, -0.0907),
++    ((1550, 4, 1, 12, 54, 38), 'penumbral', 0.0022, -0.9770),
++    ((1550, 8, 27, 5, 11, 29), 'penumbral', 0.6583, -0.4226),
++)
++
++
++def _nearest(events, reference: NASAReference):
++    target = reference.greatest_td_jd
++    return min(events, key=lambda event: abs(event.greatest_tt_jd - target))
++
++
++def run_regression(root: Path = ROOT) -> dict:
++    ephemeris = DE440Ephemeris(root / 'data' / 'de440.bsp')
++    iers = load_iers_dut1(root / 'data' / 'finals2000A.all')
++    solver = LunarEclipseSolver(ephemeris, iers_table=iers)
++    failures: list[str] = []
++    measured: list[dict] = []
++
++    by_year = {year: solver.events_for_year(year) for year in EXPECTED_COUNTS}
++    for year, expected in EXPECTED_COUNTS.items():
++        actual = len(by_year[year])
++        if actual != expected:
++            failures.append(f'{year}: expected {expected} lunar eclipses, got {actual}')
++
++    maxima = {
++        'greatest_td_seconds': 0.0,
++        'umbral_magnitude': 0.0,
++        'penumbral_magnitude': 0.0,
++        'gamma_er': 0.0,
++        'penumbral_duration_seconds': 0.0,
++        'partial_duration_seconds': 0.0,
++        'total_duration_seconds': 0.0,
++        'moon_zenith_deg': 0.0,
++        'contact_td_seconds': 0.0,
++    }
++
++    for ref in NASA_REFERENCES:
++        event = _nearest(by_year[ref.year], ref)
++        time_error = abs(event.greatest_tt_jd - ref.greatest_td_jd) * SECONDS_PER_DAY
++        um_error = abs(event.umbral_magnitude - ref.umbral_magnitude)
++        pen_error = abs(event.penumbral_magnitude - ref.penumbral_magnitude)
++        gamma_error = abs(event.gamma_abs_er - ref.gamma_abs_er)
++        pen_duration_error = abs(event.penumbral_duration_seconds - ref.penumbral_duration_min * 60.0)
++        partial_duration_error = None if ref.partial_duration_min is None else abs(
++            event.umbral_duration_seconds - ref.partial_duration_min * 60.0
++        )
++        total_duration_error = None if ref.total_duration_min is None else abs(
++            event.totality_duration_seconds - ref.total_duration_min * 60.0
++        )
++
++        zenith_ref = NASA_ZENITH_DEG[(ref.year, ref.month, ref.day)]
++        zenith_lat, zenith_lon = moon_geocentric_subpoint_deg(
++            ephemeris, event.greatest_tdb_jd, event.greatest_ut1_jd
++        )
++        zenith_lon_error = abs(((zenith_lon - zenith_ref[1] + 180.0) % 360.0) - 180.0)
++        zenith_error = max(abs(zenith_lat - zenith_ref[0]), zenith_lon_error)
++
++        maxima['greatest_td_seconds'] = max(maxima['greatest_td_seconds'], time_error)
++        maxima['umbral_magnitude'] = max(maxima['umbral_magnitude'], um_error)
++        maxima['penumbral_magnitude'] = max(maxima['penumbral_magnitude'], pen_error)
++        maxima['gamma_er'] = max(maxima['gamma_er'], gamma_error)
++        maxima['moon_zenith_deg'] = max(maxima['moon_zenith_deg'], zenith_error)
++        maxima['penumbral_duration_seconds'] = max(maxima['penumbral_duration_seconds'], pen_duration_error)
++        if partial_duration_error is not None:
++            maxima['partial_duration_seconds'] = max(maxima['partial_duration_seconds'], partial_duration_error)
++        if total_duration_error is not None:
++            maxima['total_duration_seconds'] = max(maxima['total_duration_seconds'], total_duration_error)
++
++        label = f'{ref.year}-{ref.month:02d}-{ref.day:02d}'
++        if event.eclipse_type.value != ref.eclipse_type:
++            failures.append(f'{label}: type {event.eclipse_type.value} != NASA {ref.eclipse_type}')
++        if time_error > TIME_TOLERANCE_SECONDS:
++            failures.append(f'{label}: greatest TD error {time_error:.3f}s > {TIME_TOLERANCE_SECONDS:.1f}s')
++        if um_error > MAG_TOLERANCE:
++            failures.append(f'{label}: umbral magnitude error {um_error:.6f}')
++        if pen_error > MAG_TOLERANCE:
++            failures.append(f'{label}: penumbral magnitude error {pen_error:.6f}')
++        if gamma_error > GAMMA_TOLERANCE_ER:
++            failures.append(f'{label}: |gamma| error {gamma_error:.6f} Earth radii')
++
++        if zenith_error > 0.75:
++            failures.append(f'{label}: Moon-at-zenith coordinate error {zenith_error:.3f} deg')
++
++        pen_duration_limit = (
++            BOUNDARY_PENUMBRAL_DURATION_TOLERANCE_SECONDS
++            if ref.penumbral_magnitude < 0.01 else DURATION_TOLERANCE_SECONDS
++        )
++        if pen_duration_error > pen_duration_limit:
++            failures.append(f'{label}: penumbral duration error {pen_duration_error:.2f}s')
++        if partial_duration_error is not None and partial_duration_error > DURATION_TOLERANCE_SECONDS:
++            failures.append(f'{label}: partial duration error {partial_duration_error:.2f}s')
++        if total_duration_error is not None and total_duration_error > DURATION_TOLERANCE_SECONDS:
++            failures.append(f'{label}: total duration error {total_duration_error:.2f}s')
++
++        measured.append({
++            'date': label,
++            'type': event.eclipse_type.value,
++            'greatest_td_error_seconds': time_error,
++            'umbral_error': um_error,
++            'penumbral_error': pen_error,
++            'gamma_error_er': gamma_error,
++            'moon_zenith_error_deg': zenith_error,
++            'penumbral_duration_error_seconds': pen_duration_error,
++            'partial_duration_error_seconds': partial_duration_error,
++            'total_duration_error_seconds': total_duration_error,
++        })
++
++    # Exact 2026 Mar 03 contact-root audit against NASA's detailed figure.
++    event_2026 = _nearest(
++        by_year[2026],
++        next(r for r in NASA_REFERENCES if (r.year, r.month, r.day) == (2026, 3, 3)),
++    )
++    for phase, (hour, minute, second) in NASA_2026_CONTACTS_UT.items():
++        nasa_td = gregorian_to_jd(
++            2026, 3, 3, hour, minute, second + NASA_2026_FIGURE_DELTA_T_SECONDS
++        )
++        contact_error = abs(float(event_2026.contacts_tdb_jd[phase]) - nasa_td) * SECONDS_PER_DAY
++        maxima['contact_td_seconds'] = max(maxima['contact_td_seconds'], contact_error)
++        if contact_error > CONTACT_TIME_TOLERANCE_SECONDS:
++            failures.append(
++                f'2026-contact-{phase}: TD error {contact_error:.3f}s > {CONTACT_TIME_TOLERANCE_SECONDS:.1f}s'
++            )
++
++    # Deep-time historical calendar regression against NASA's Julian-dated 1550 catalog.
++    events_1550 = solver.events_for_year(1550)
++    historical_time_max = 0.0
++    historical_mag_max = 0.0
++    if len(events_1550) != len(NASA_1550_JULIAN_REFERENCES):
++        failures.append(f'1550: expected {len(NASA_1550_JULIAN_REFERENCES)} historical eclipses, got {len(events_1550)}')
++    for date_parts, expected_type, pen_mag, um_mag in NASA_1550_JULIAN_REFERENCES:
++        target = julian_to_jd(*date_parts)
++        event = min(events_1550, key=lambda e: abs(e.greatest_tt_jd - target))
++        td_error = abs(event.greatest_tt_jd - target) * SECONDS_PER_DAY
++        mag_error = max(abs(event.penumbral_magnitude - pen_mag), abs(event.umbral_magnitude - um_mag))
++        historical_time_max = max(historical_time_max, td_error)
++        historical_mag_max = max(historical_mag_max, mag_error)
++        if event.eclipse_type.value != expected_type:
++            failures.append(f'1550 historical: type {event.eclipse_type.value} != NASA {expected_type}')
++        if td_error > TIME_TOLERANCE_SECONDS:
++            failures.append(f'1550 historical: TD error {td_error:.3f}s')
++        if mag_error > MAG_TOLERANCE:
++            failures.append(f'1550 historical: magnitude error {mag_error:.6f}')
++    historical_1550 = {
++        'count': len(events_1550),
++        'max_td_error_seconds': historical_time_max,
++        'max_magnitude_error': historical_mag_max,
++    }
++
++    # Detailed Danjon geometry audit against NASA's 2026 Mar 03 figure.
++    # The figure publishes radii/semidiameters rounded to 0.0001 deg or 0.1 arcsec.
++    nasa_shadow_reference = {
++        'penumbral_radius_deg': 1.2361,
++        'umbral_radius_deg': 0.6983,
++        'moon_semidiameter_deg': (15.0 + 37.0 / 60.0) / 60.0,
++        'sun_semidiameter_deg': (16.0 + 8.0 / 60.0) / 60.0,
++    }
++    nasa_2026_shadow_geometry = {
++        'penumbral_radius_deg': event_2026.penumbral_radius_deg,
++        'umbral_radius_deg': event_2026.umbral_radius_deg,
++        'moon_semidiameter_deg': event_2026.moon_semidiameter_deg,
++        'sun_semidiameter_deg': event_2026.sun_semidiameter_deg,
++    }
++    shadow_errors = {
++        key: abs(nasa_2026_shadow_geometry[key] - value)
++        for key, value in nasa_shadow_reference.items()
++    }
++    nasa_2026_shadow_geometry['errors_deg'] = shadow_errors
++    nasa_2026_shadow_geometry['max_angular_error_deg'] = max(shadow_errors.values())
++    if nasa_2026_shadow_geometry['max_angular_error_deg'] >= 0.0003:
++        failures.append(
++            '2026 shadow geometry: max angular error '
++            f"{nasa_2026_shadow_geometry['max_angular_error_deg']:.7f} deg >= 0.0003 deg"
++        )
++
++    # Boundary probes verify that the public 1550..2650 selector does not crash.
++    # Exact SPK JD coverage remains authoritative, especially late January 2650.
++    boundary = {}
++    for year in (1550, 1600, 2649, 2650):
++        events = solver.events_for_year(year)
++        boundary[year] = len(events)
++        if any(event.year != year for event in events):
++            failures.append(f'{year}: solver returned event assigned to another year')
++
++    return {
++        'ok': not failures,
++        'failures': failures,
++        'measured': measured,
++        'max_errors': maxima,
++        'boundary_event_counts': boundary,
++        'de440_coverage_jd': list(ephemeris.coverage_jd),
++        'historical_1550': historical_1550,
++        'nasa_2026_shadow_geometry': nasa_2026_shadow_geometry,
++    }
++
++
++def main() -> int:
++    result = run_regression()
++    print('============================================================')
++    print(' ALBAZ LUNAR DE440 SCIENTIFIC REGRESSION')
++    print(' NASA 2024-2030 external reference + DE440 boundary probes')
++    print('============================================================')
++    for row in result['measured']:
++        print(
++            f"[CHECK] {row['date']} {row['type']:<10} "
++            f"dT={row['greatest_td_error_seconds']:.3f}s "
++            f"dUm={row['umbral_error']:.6f} dPen={row['penumbral_error']:.6f} "
++            f"dGamma={row['gamma_error_er']:.6f}ER"
++        )
++    print('[MAX]', result['max_errors'])
++    print('[CHECK] historical 1550:', result['historical_1550'])
++    print('[CHECK] boundary counts:', result['boundary_event_counts'])
++    if result['ok']:
++        print('[PASS] Lunar scientific regression GREEN')
++        return 0
++    print('[FAIL] Lunar scientific regression')
++    for item in result['failures']:
++        print('  - ' + item)
++    return 1
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())

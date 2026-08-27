@@ -1,0 +1,196 @@
+diff --git a/BUILD_FINAL_EXE_AND_OPEN.cmd b/BUILD_FINAL_EXE_AND_OPEN.cmd
+new file mode 100644
+index 0000000..451fa1e
+--- /dev/null
++++ b/BUILD_FINAL_EXE_AND_OPEN.cmd
+@@ -0,0 +1,51 @@
++@echo off
++setlocal EnableExtensions
++chcp 65001 >nul
++cd /d "%~dp0"
++title ALBAZ LUNAR ECLIPSE ATLAS - BUILD FINAL EXE AND OPEN
++
++set "APPNAME=ALBAZ_LUNAR_ECLIPSE_ATLAS_9_6_3_TESLA_FINAL"
++set "EXENAME=ALBAZ_LUNAR_ECLIPSE_ATLAS_9_6_3_TESLA_FINAL.exe"
++set "EXE=%CD%\FINAL_WINDOWS_LUNAR\%APPNAME%\%EXENAME%"
++
++echo ============================================================
++echo  ALBAZ LUNAR ECLIPSE ATLAS v9.6.3 TESLA FINAL
++echo  BUILD FINAL WINDOWS EXE AND OPEN
++echo ============================================================
++
++if exist "%EXE%" (
++  echo [OK] Existing verified EXE found.
++  echo Launching: %EXE%
++  start "" "%EXE%"
++  exit /b 0
++)
++
++echo No built EXE exists yet.
++echo Starting the full verified Windows builder...
++echo This same window will remain open if a build step fails.
++echo.
++call START_BUILD_LUNAR_9_6_3_FINAL_EXE.cmd
++set "RC=%ERRORLEVEL%"
++if not "%RC%"=="0" (
++  echo.
++  echo ============================================================
++  echo [BUILD FAILED] Exit code: %RC%
++  echo The error is shown above. Take a screenshot and send it here.
++  echo ============================================================
++  pause
++  exit /b %RC%
++)
++
++if not exist "%EXE%" (
++  echo.
++  echo [ERROR] Builder returned success but the final EXE was not found:
++  echo %EXE%
++  pause
++  exit /b 20
++)
++
++echo.
++echo [SUCCESS] Final EXE created and verified.
++echo Launching ALBAZ Lunar Eclipse Atlas...
++start "" "%EXE%"
++exit /b 0
+diff --git a/PREPARE_WORLD_CITIES_LUNAR.cmd b/PREPARE_WORLD_CITIES_LUNAR.cmd
+new file mode 100644
+index 0000000..99b97b8
+--- /dev/null
++++ b/PREPARE_WORLD_CITIES_LUNAR.cmd
+@@ -0,0 +1,32 @@
++@echo off
++setlocal EnableExtensions
++chcp 65001 >nul
++cd /d "%~dp0"
++title ALBAZ Lunar Eclipse Atlas - Prepare Global Cities
++
++echo ============================================================
++echo  ALBAZ LUNAR ECLIPSE ATLAS v9.6.3 TESLA FINAL
++echo  OFFLINE WORLD CITIES DATABASE PREPARATION
++echo ============================================================
++
++set "PYEXE="
++if defined LUNAR_PYTHON if exist "%LUNAR_PYTHON%" set "PYEXE=%LUNAR_PYTHON%"
++if not defined PYEXE for /f "delims=" %%P in ('py -3.11 -c "import sys; assert sys.maxsize ^> 2**32; print(sys.executable)" 2^>nul') do set "PYEXE=%%P"
++if not defined PYEXE (
++  echo [ERROR] Python 3.11 x64 was not found.
++  exit /b 2
++)
++
++set "CACHE=%LOCALAPPDATA%\ALBAZ_ASTROTECH\LUNAR_GEONAMES"
++if not exist "%CACHE%" mkdir "%CACHE%"
++
++echo [1/2] Preparing official GeoNames cities500 data...
++"%PYEXE%" scripts\fetch_geonames_lunar.py --cache-dir "%CACHE%" --output "data\world_cities.sqlite3"
++if errorlevel 1 exit /b 3
++
++echo [2/2] Running lunar source preflight...
++"%PYEXE%" lunar_release_preflight.py --root "%CD%" --min-cities 100000
++if errorlevel 1 exit /b 4
++
++echo SUCCESS - data\world_cities.sqlite3 is ready.
++exit /b 0
+diff --git a/README_LUNAR_FINAL_AR.md b/README_LUNAR_FINAL_AR.md
+new file mode 100644
+index 0000000..b2b2a7b
+--- /dev/null
++++ b/README_LUNAR_FINAL_AR.md
+@@ -0,0 +1,54 @@
++# ALBAZ LUNAR ECLIPSE ATLAS v9.6.3 TESLA FINAL — Windows FIX V2
++
++هذه الحزمة هي النسخة المصححة بعد اكتشاف أن الحزمة السابقة كانت **Builder وليست EXE جاهزًا**.
++
++## افتح البرنامج الآن
++
++بعد فك الضغط كاملًا، انقر مرتين على:
++
++`00_RUN_LUNAR_NOW.cmd`
++
++هذا الملف يبحث عن Python 3.11 أو 3.12 أو 3.13 بنظام 64-bit، ينشئ بيئة تشغيل معزولة، يثبت NumPy/SciPy/PySide6 عند الحاجة، ثم يفتح `lunar_main.py`.
++
++- في أول تشغيل قد يحتاج اتصال إنترنت لتنزيل مكتبات Python.
++- إذا حدث خطأ، لن تغلق النافذة تلقائيًا؛ سيبقى الخطأ ظاهرًا لتصويره أو نسخه.
++- DE440 وIERS والخريطة موجودة داخل الحزمة.
++- قاعدة المدن العالمية ليست شرطًا لفتح الواجهة من المصدر؛ تُجهز أثناء بناء النسخة النهائية.
++
++## بناء EXE النهائي ثم فتحه
++
++انقر مرتين على:
++
++`01_BUILD_FINAL_EXE_AND_OPEN.cmd`
++
++إذا كان EXE النهائي موجودًا بالفعل، يفتحه مباشرة. وإذا لم يكن موجودًا، يشغّل بوابة البناء الكاملة، ثم يفتح EXE تلقائيًا بعد نجاح الاختبارات وRegression وPreflight وSmoke Test.
++
++## البناء المتقدم
++
++يمكن أيضًا تشغيل:
++
++`START_BUILD_LUNAR_9_6_3_FINAL_EXE.cmd`
++
++يدعم Python 3.11–3.13 x64. ويقوم بـ:
++
++1. إنشاء بيئة Python معزولة.
++2. تثبيت NumPy/SciPy/PySide6/Nuitka/Pytest.
++3. تجهيز قاعدة GeoNames العالمية.
++4. تشغيل اختبارات Lunar.
++5. تشغيل DE440/NASA Regression.
++6. تشغيل Preflight.
++7. بناء Nuitka Standalone.
++8. تشغيل EXE الحقيقي في Smoke Mode.
++9. إنشاء ZIP وSHA-256.
++
++## المحرك العلمي
++
++- JPL DE440 Offline من `data/de440.bsp`.
++- نموذج ظل الأرض Danjon 1.01.
++- التماسات العالمية P1/U1/U2/GREATEST/U3/U4/P4.
++- IERS DUT1 للأزمنة الحديثة، وUT1 من نموذج ΔT المعلن خارج تغطية IERS.
++- WGS84 للرؤية المحلية وارتفاع/سمت القمر.
++
++## ملاحظة مهمة
++
++لا تشغّل ملف ZIP مباشرة. يجب أولًا **فك الضغط إلى مجلد عادي**، ثم تشغيل `00_RUN_LUNAR_NOW.cmd` من داخل المجلد المفكوك.
+diff --git a/RUN_LUNAR_NOW.cmd b/RUN_LUNAR_NOW.cmd
+new file mode 100644
+index 0000000..b076a54
+--- /dev/null
++++ b/RUN_LUNAR_NOW.cmd
+@@ -0,0 +1,91 @@
++@echo off
++setlocal EnableExtensions
++chcp 65001 >nul
++cd /d "%~dp0"
++title ALBAZ LUNAR ECLIPSE ATLAS - RUN NOW
++
++echo ============================================================
++echo  ALBAZ LUNAR ECLIPSE ATLAS v9.6.3 TESLA FINAL
++echo  DIRECT SOURCE LAUNCHER - WINDOWS
++echo ============================================================
++
++echo [1/4] Detecting 64-bit Python 3.11-3.13...
++set "PYBASE="
++for /f "delims=" %%P in ('py -3.11 -c "import sys; assert sys.maxsize ^> 2**32; print(sys.executable)" 2^>nul') do set "PYBASE=%%P"
++if not defined PYBASE for /f "delims=" %%P in ('py -3.12 -c "import sys; assert sys.maxsize ^> 2**32; print(sys.executable)" 2^>nul') do set "PYBASE=%%P"
++if not defined PYBASE for /f "delims=" %%P in ('py -3.13 -c "import sys; assert sys.maxsize ^> 2**32; print(sys.executable)" 2^>nul') do set "PYBASE=%%P"
++if not defined PYBASE for /f "delims=" %%P in ('python -c "import sys; assert (3,11) ^<= sys.version_info[:2] \|<= (3,13) and sys.maxsize ^> 2**32; print(sys.executable)" 2^>nul') do set "PYBASE=%%P"
++if not defined PYBASE (
++  echo.
++  echo [ERROR] Python 3.11, 3.12, or 3.13 x64 was not found.
++  echo Install a 64-bit Python version in that range, then run this file again.
++  echo The window will stay open so the error is visible.
++  echo.
++  pause
++  exit /b 2
+)
++
++echo [OK] Python: %PYBASE%
++set "ENVROOT=%LOCALAPPDATA%\ALBAZ_ASTROTECH\LUNAR_RUN_ENV"
++set "VENV=%ENVROOT%\venv"
++set "PY=%VENV%\Scripts\python.exe"
++
++if not exist "%PY%" (
++  echo [2/4] Creating isolated run environment...
++  "%PYBA

@@ -1,0 +1,307 @@
+diff --git a/lunar_core/solver.py b/lunar_core/solver.py
+index 17def5b..b4a9e55 100644
+--- a/lunar_core/solver.py
++++ b/lunar_core/solver.py
+@@ -1,7 +1,6 @@
+ """Global lunar-eclipse discovery and contact solving from DE440."""
+ from __future__ import annotations
+ 
+-from datetime import datetime, timedelta
+ import math
+ from typing import Callable
+ 
+@@ -12,7 +11,12 @@ from .constants import R_E_KM, SHADOW_MODEL_LABEL, DE440_START_YEAR, DE440_END_Y
+ from .de440 import DE440Ephemeris
+ from .geometry import classify_eclipse, shadow_geometry_from_vectors
+ from .models import LunarEclipseEvent, LunarEclipseType, ShadowGeometry
+-from .time_scales import IERSDUT1Table, best_tt_to_earth_rotation, gregorian_to_jd
++from .time_scales import (
++    IERSDUT1Table,
++    best_tt_to_earth_rotation,
++    historical_calendar_components,
++    historical_year_start_jd,
++)
+ 
+ SECONDS_PER_DAY = 86400.0
+ 
+@@ -59,9 +63,9 @@ def solve_contact_pair(
+ 
+ 
+ def _month_for_jd(jd: float, year: int) -> int:
+-    jan1 = gregorian_to_jd(year, 1, 1)
+-    dt = datetime(year, 1, 1) + timedelta(days=float(jd) - jan1)
+-    return dt.month
++    # Use the same historical calendar convention as the public year selector:
++    # Julian before the 1582 reform, Gregorian afterwards.
++    return int(historical_calendar_components(float(jd))[1])
+ 
+ 
+ class LunarEclipseSolver:
+@@ -81,9 +85,16 @@ class LunarEclipseSolver:
+         except ValueError:
+             return math.pi
+ 
++    def _axis_distance_objective(self, jd_tdb: float) -> float:
++        """Linear Moon-to-umbra-axis distance used to define greatest eclipse."""
++        try:
++            return self.geometry_at(jd_tdb).axis_distance_km
++        except ValueError:
++            return math.inf
++
+     def _candidate_minima(self, year: int) -> list[float]:
+-        start = gregorian_to_jd(year, 1, 1) - 2.0
+-        end = gregorian_to_jd(year + 1, 1, 1) + 2.0
++        start = historical_year_start_jd(year) - 2.0
++        end = historical_year_start_jd(year + 1) + 2.0
+         # Six-hour cadence robustly brackets the single anti-solar minimum per lunation.
+         grid = np.arange(start, end + 0.250001, 0.25, dtype=float)
+         values = np.asarray([self._gamma_objective(float(jd)) for jd in grid])
+@@ -100,7 +111,7 @@ class LunarEclipseSolver:
+                 center = float(grid[i])
+                 half = float(grid[i + 1] - grid[i])
+                 result = minimize_scalar(
+-                    lambda offset: self._gamma_objective(center + float(offset)),
++                    lambda offset: self._axis_distance_objective(center + float(offset)),
+                     bounds=(-half, half),
+                     method="bounded",
+                     options={"xatol": 1e-10, "maxiter": 100},
+@@ -201,8 +212,8 @@ class LunarEclipseSolver:
+         if y < DE440_START_YEAR or y > DE440_END_YEAR:
+             raise ValueError(f"Certified DE440 lunar range is {DE440_START_YEAR}..{DE440_END_YEAR}")
+         result: list[LunarEclipseEvent] = []
+-        start = gregorian_to_jd(y, 1, 1)
+-        end = gregorian_to_jd(y + 1, 1, 1)
++        start = historical_year_start_jd(y)
++        end = historical_year_start_jd(y + 1)
+         for jd in self._candidate_minima(y):
+             if not (start <= jd < end):
+                 continue
+diff --git a/lunar_core/time_scales.py b/lunar_core/time_scales.py
+index 746b42c..3ceaca0 100644
+--- a/lunar_core/time_scales.py
++++ b/lunar_core/time_scales.py
+@@ -8,8 +8,10 @@ from __future__ import annotations
+ 
+ from bisect import bisect_right
+ from dataclasses import dataclass
++from datetime import datetime, timedelta, timezone
+ from pathlib import Path
+ from typing import Iterable
++from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+ 
+ SECONDS_PER_DAY = 86400.0
+ MJD_ZERO_JD = 2400000.5
+@@ -185,8 +187,149 @@ def gregorian_to_jd(
+     )
+ 
+ 
+-# Historical UTC step table.  The final entry remains valid through
+-# 2026-12-31 under IERS Bulletin C 72 (issued 2026-07-06).
++def julian_to_jd(
++    year: int,
++    month: int,
++    day: int,
++    hour: int = 0,
++    minute: int = 0,
++    second: float = 0.0,
++) -> float:
++    """Convert a proleptic-Julian civil date to Julian Date."""
++    y = int(year)
++    m = int(month)
++    if m <= 2:
++        y -= 1
++        m += 12
++    frac = (float(hour) + (float(minute) + float(second) / 60.0) / 60.0) / 24.0
++    return (
++        int(365.25 * (y + 4716))
++        + int(30.6001 * (m + 1))
++        + int(day)
++        - 1524.5
++        + frac
++    )
++
++
++GREGORIAN_REFORM_JD = 2299160.5  # 1582-10-15 Gregorian = 1582-10-05 Julian
++
++
++def jd_to_calendar_components(jd: float, *, calendar: str = "gregorian") -> tuple[int, int, int, int, int, float]:
++    """Convert JD to civil components in the requested proleptic calendar.
++
++    This is a calendar-label conversion only; the astronomical instant is
++    unchanged.  `calendar` must be ``gregorian`` or ``julian``.
++    """
++    cal = str(calendar).strip().lower()
++    if cal not in {"gregorian", "julian"}:
++        raise ValueError("calendar must be 'gregorian' or 'julian'")
++    x = float(jd) + 0.5
++    z = int(x // 1)
++    f = x - z
++    if cal == "gregorian":
++        alpha = int((z - 1867216.25) / 36524.25)
++        a = z + 1 + alpha - alpha // 4
++    else:
++        a = z
++    b = a + 1524
++    c = int((b - 122.1) / 365.25)
++    d = int(365.25 * c)
++    e = int((b - d) / 30.6001)
++    day_float = b - d - int(30.6001 * e) + f
++    day = int(day_float)
++    frac_day = day_float - day
++    month = e - 1 if e < 14 else e - 13
++    year = c - 4716 if month > 2 else c - 4715
++
++    total_seconds = frac_day * SECONDS_PER_DAY
++    hour = int(total_seconds // 3600.0)
++    total_seconds -= hour * 3600.0
++    minute = int(total_seconds // 60.0)
++    second = total_seconds - minute * 60.0
++    # Floating-point JD arithmetic can produce 59.99999/60.00000 around exact
++    # civil seconds. Normalize tiny overflows without changing the date.
++    if second >= 59.9999995:
++        second = 60.0
++    return int(year), int(month), int(day), hour, minute, float(second)
++
++
++def historical_calendar_components(jd: float) -> tuple[int, int, int, int, int, float, str]:
++    """NASA-style historical civil label: Julian before 1582-10-15, Gregorian after."""
++    if float(jd) < GREGORIAN_REFORM_JD:
++        return (*jd_to_calendar_components(jd, calendar="julian"), "Julian")
++    return (*jd_to_calendar_components(jd, calendar="gregorian"), "Gregorian")
++
++
++
++
++def format_jd_label(jd: float | None, scale: str, *, historical: bool = True) -> str:
++    """Format a Julian Date at whole-second precision without calendar ambiguity.
++
++    Before the Gregorian reform the default historical label follows the same
++    Julian-calendar convention used by the NASA eclipse catalogs.  Modern
++    labels remain uncluttered because Gregorian is unambiguous there.
++    """
++    if jd is None:
++        return "—"
++    rounded_jd = float(jd) + 0.5 / SECONDS_PER_DAY
++    if historical:
++        year, month, day, hour, minute, second, calendar = historical_calendar_components(rounded_jd)
++    else:
++        year, month, day, hour, minute, second = jd_to_calendar_components(rounded_jd, calendar="gregorian")
++        calendar = "Gregorian"
++    whole_second = int(second)
++    label = f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{whole_second:02d} {str(scale).strip()}"
++    if historical and calendar == "Julian":
++        label += " [Julian]"
++    return label
++
++
++def _modern_utc_datetime(utc_jd: float) -> datetime:
++    """Convert a certified modern UTC JD to an aware datetime.
++
++    This helper is intentionally limited to the era where this atlas actually
++    supplies UTC (1972..2026).  It is never used to fabricate historical UTC.
++    """
++    base = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
++    dt = base + timedelta(days=float(utc_jd) - 2451545.0)
++    return (dt + timedelta(microseconds=500_000)).replace(microsecond=0)
++
++
++def local_time_text(
++    utc_jd: float | None,
++    timezone_name: str,
++    *,
++    timezone_known: bool = True,
++) -> str:
++    """Return an IANA-zone local civil time only when certified UTC exists.
++
++    Unknown UTC or an unknown/invalid timezone returns an em dash rather than
++    inventing a civil time from UT1.
++    """
++    if utc_jd is None or not timezone_known or not str(timezone_name or "").strip():
++        return "—"
++    key = str(timezone_name).strip()
++    try:
++        zone = ZoneInfo(key)
++    except (ZoneInfoNotFoundError, ValueError):
++        return "—"
++    local = _modern_utc_datetime(float(utc_jd)).astimezone(zone)
++    offset = local.strftime("%z")
++    if len(offset) == 5:
++        offset = offset[:3] + ":" + offset[3:]
++    return f"{local:%Y-%m-%d %H:%M:%S} {key} (UTC{offset})"
++
++def historical_year_start_jd(year: int) -> float:
++    """JD of Jan 1 in the historical Julian/Gregorian calendar convention."""
++    y = int(year)
++    return julian_to_jd(y, 1, 1) if y <= 1582 else gregorian_to_jd(y, 1, 1)
++
++
++# Historical UTC step table.  IERS Bulletin C 72 (issued 2026-07-06)
++# announces no leap second at the end of December 2026 and states
++# UTC-TAI = -37 s from 2017-01-01 until further notice.  Therefore 37 s
++# is certified through 2027-06-30, immediately before the next possible
++# June leap-second insertion boundary.
+ _TAI_MINUS_UTC_STEPS = (
+     ((1972, 1, 1), 10), ((1972, 7, 1), 11), ((1973, 1, 1), 12),
+     ((1974, 1, 1), 13), ((1975, 1, 1), 14), ((1976, 1, 1), 15),
+@@ -202,13 +345,15 @@ _TAI_MINUS_UTC_STEPS = (
+ 
+ 
+ def known_tai_minus_utc_seconds(utc_jd: float) -> int | None:
+-    """Return the certified TAI-UTC step for 1972 through 2026.
++    """Return the certified TAI-UTC step for 1972 through 2027-06-30.
+ 
+-    Dates after 2026-12-31 deliberately return ``None``: future leap-second
+-    decisions must not be guessed.
++    Bulletin C 72 guarantees no step at 2026-12-31 and keeps UTC-TAI at
++    -37 s until further notice.  The next ordinary insertion opportunity is
++    the end of 2027-06-30, so instants on/after 2027-07-01 deliberately
++    return ``None`` until a later Bulletin C is incorporated.
+     """
+     x = float(utc_jd)
+-    if x < gregorian_to_jd(1972, 1, 1) or x >= gregorian_to_jd(2027, 1, 1):
++    if x < gregorian_to_jd(1972, 1, 1) or x >= gregorian_to_jd(2027, 7, 1):
+         return None
+     value = None
+     for date, offset in _TAI_MINUS_UTC_STEPS:
+@@ -262,7 +407,7 @@ def best_tt_to_earth_rotation(
+                     utc_jd=utc_jd,
+                     delta_t_seconds=delta_t,
+                     dut1_seconds=sample.seconds,
+-                    source=f"{sample.source}; TAI-UTC={tai_utc}s (Bulletin C 72 certified through 2026)",
++                    source=f"{sample.source}; TAI-UTC={tai_utc}s (Bulletin C 72 certified through 2027-06-30)",
+                 )
+     ut1, delta_t, source = tt_jd_to_ut1_jd(tt_jd, year, month)
+     return EarthRotationTime(
+diff --git a/lunar_core/topocentric.py b/lunar_core/topocentric.py
+index 9ad9f5a..5929736 100644
+--- a/lunar_core/topocentric.py
++++ b/lunar_core/topocentric.py
+@@ -60,6 +60,28 @@ def observer_ecef_km(latitude_deg: float, longitude_deg: float, elevation_m: flo
+     ], dtype=float)
+ 
+ 
++
++def moon_geocentric_subpoint_deg(
++    ephemeris: DE440Ephemeris,
++    jd_tdb: float,
++    jd_ut1: float,
++) -> tuple[float, float]:
++    """Geocentric latitude/longitude where the Moon is on the local meridian at zenith.
++
++    This uses the same DE440/precession/UT1 frame as the local Alt/Az engine,
++    making it a useful global-frame regression against NASA's rounded
++    ``Moon at Zenith`` catalog coordinates.
++    """
++    moon_j2000 = ephemeris.earth_to_moon_km(float(jd_tdb))
++    moon_date = _precess_j2000_to_date(moon_j2000, float(jd_tdb))
++    r = float(np.linalg.norm(moon_date))
++    if r <= 0.0:
++        raise ValueError("Zero Moon vector")
++    ra = math.atan2(float(moon_date[1]), float(moon_date[0]))
++    dec = math.asin(float(moon_date[2]) / r)
++    lon = (math.degrees(ra - gmst_rad(float(jd_ut1))) + 180.0) % 360.0 - 180.0
++    return math.degrees(dec), lon
++
+ def moon_alt_az_deg(
+     ephemeris: DE440Ephemeris,
+     jd_tdb: float,

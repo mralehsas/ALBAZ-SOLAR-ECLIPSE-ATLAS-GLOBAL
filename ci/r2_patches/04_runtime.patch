@@ -1,0 +1,155 @@
+diff --git a/scripts/lunar_runtime_smoke.py b/scripts/lunar_runtime_smoke.py
+index ff33418..1a12e01 100644
+--- a/scripts/lunar_runtime_smoke.py
++++ b/scripts/lunar_runtime_smoke.py
+@@ -5,7 +5,6 @@ import json
+ import os
+ from pathlib import Path
+ import subprocess
+-import sys
+ import tempfile
+ import time
+ 
+@@ -25,19 +24,22 @@ def run_smoke(exe: Path, timeout: float = 120.0) -> dict:
+     fail_path.unlink(missing_ok=True)
+     env = os.environ.copy()
+     env[SMOKE_ENV] = '1'
+-    proc = subprocess.Popen([str(exe)], cwd=str(exe.parent), env=env)
++    proc = subprocess.Popen(
++        [str(exe)], cwd=str(exe.parent), env=env,
++        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
++        text=True, errors='replace',
++    )
+     deadline = time.monotonic() + float(timeout)
+     while time.monotonic() < deadline:
+         rc = proc.poll()
+         if rc is not None:
+             break
+         if fail_path.is_file() or ok_path.is_file():
+-            # Let the application process its queued exit before judging rc.
+             try:
+-                rc = proc.wait(timeout=5)
++                proc.wait(timeout=5)
+             except subprocess.TimeoutExpired:
+                 proc.terminate()
+-                rc = proc.wait(timeout=5)
++                proc.wait(timeout=5)
+             break
+         time.sleep(0.2)
+     else:
+@@ -46,15 +48,30 @@ def run_smoke(exe: Path, timeout: float = 120.0) -> dict:
+             proc.wait(timeout=5)
+         except subprocess.TimeoutExpired:
+             proc.kill()
+-        raise TimeoutError(f'Lunar packaged runtime smoke exceeded {timeout}s')
++            proc.wait(timeout=5)
++        out, err = proc.communicate()
++        raise TimeoutError(
++            f'Lunar packaged runtime smoke exceeded {timeout}s\nSTDOUT:\n{out}\nSTDERR:\n{err}'
++        )
+ 
+-    rc = proc.poll()
++    out, err = proc.communicate()
++    rc = proc.returncode
+     if fail_path.is_file():
+-        raise RuntimeError('ALBAZ lunar packaged runtime failed:\n' + fail_path.read_text(encoding='utf-8', errors='replace'))
++        raise RuntimeError(
++            'ALBAZ lunar packaged runtime failed:\n' +
++            fail_path.read_text(encoding='utf-8', errors='replace') +
++            f'\nSTDOUT:\n{out}\nSTDERR:\n{err}'
++        )
+     if rc != 0:
+-        raise RuntimeError(f'ALBAZ lunar packaged runtime exited with code {rc}')
++        raise RuntimeError(
++            f'ALBAZ lunar packaged runtime exited with code {rc}'
++            f'\nSTDOUT:\n{out}\nSTDERR:\n{err}'
++        )
+     if not ok_path.is_file():
+-        raise RuntimeError('ALBAZ_LUNAR_RUNTIME_SMOKE_OK.json was not created')
++        raise RuntimeError(
++            'ALBAZ_LUNAR_RUNTIME_SMOKE_OK.json was not created'
++            f'\nSTDOUT:\n{out}\nSTDERR:\n{err}'
++        )
+     payload = json.loads(ok_path.read_text(encoding='utf-8'))
+     if payload.get('status') != 'ok':
+         raise RuntimeError(f'Unexpected smoke payload: {payload}')
+diff --git a/services/lunar_report_builder.py b/services/lunar_report_builder.py
+index 4f39df1..b90e17c 100644
+--- a/services/lunar_report_builder.py
++++ b/services/lunar_report_builder.py
+@@ -1,17 +1,8 @@
+ from __future__ import annotations
+ 
+-from datetime import datetime, timedelta, timezone
+ from html import escape
+ 
+-J2000_UTCISH = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+-J2000_JD = 2451545.0
+-
+-
+-def _fmt_jd(jd: float | None) -> str:
+-    if jd is None:
+-        return "—"
+-    dt = J2000_UTCISH + timedelta(days=float(jd) - J2000_JD)
+-    return dt.strftime("%Y-%m-%d %H:%M:%S") + " UT1"
++from lunar_core.time_scales import format_jd_label, local_time_text
+ 
+ 
+ def _type_ar(value: str) -> str:
+@@ -23,20 +14,36 @@ def build_lunar_city_report_html(event, result, location, *, language: str = "ar
+     title = "تقرير الخسوف القمري للمدينة" if ar else "Lunar Eclipse City Report"
+     global_type = _type_ar(event.eclipse_type.value) if ar else event.eclipse_type.value.title()
+     city = location.name_ar if ar and location.name_ar else location.name_en
++    tz_name = location.timezone if getattr(location, "timezone_known", False) else "—"
++    utc_available = event.greatest_utc_jd is not None
+     rows = []
+     for phase in ("P1", "U1", "U2", "GREATEST", "U3", "U4", "P4"):
+         state = result.contacts.get(phase)
++        utc_jd = event.contacts_utc_jd.get(phase)
+         if state is None:
+-            rows.append(f"<tr><td>{phase}</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>")
+-        else:
+-            vis = "مرئي" if ar and state.moon_above_horizon else ("غير مرئي" if ar else ("Visible" if state.moon_above_horizon else "Not visible"))
+-            if not ar:
+-                vis = "Visible" if state.moon_above_horizon else "Not visible"
+-            rows.append(
+-                f"<tr><td>{phase}</td><td>{_fmt_jd(state.ut1_jd)}</td>"
+-                f"<td>{state.moon_alt_deg:.3f}°</td><td>{state.moon_az_deg:.3f}°</td><td>{vis}</td></tr>"
+-            )
++            rows.append("<tr><td>%s</td>%s</tr>" % (phase, "<td>—</td>" * 6))
++            continue
++        vis = ("مرئي" if state.moon_above_horizon else "غير مرئي") if ar else ("Visible" if state.moon_above_horizon else "Not visible")
++        utc_text = format_jd_label(utc_jd, "UTC") if utc_jd is not None else "—"
++        local_text = local_time_text(
++            utc_jd,
++            location.timezone,
++            timezone_known=bool(getattr(location, "timezone_known", False)),
++        )
++        ut1_text = format_jd_label(state.ut1_jd, "UT1")
++        rows.append(
++            f"<tr><td>{phase}</td><td>{escape(utc_text)}</td><td>{escape(local_text)}</td>"
++            f"<td>{escape(ut1_text)}</td><td>{state.moon_alt_deg:.3f}°</td>"
++            f"<td>{state.moon_az_deg:.3f}°</td><td>{escape(vis)}</td></tr>"
++        )
+     direction = "rtl" if ar else "ltr"
++    unavailable = ""
++    if not utc_available:
++        unavailable = (
++            "<br><b>UTC/local civil time unavailable:</b> historical/future epoch is represented by UT1 from the declared ΔT model; civil UTC is not fabricated."
++            if not ar else
++            "<br><b>UTC والوقت المحلي غير متاحين:</b> الحقبة التاريخية/البعيدة ممثلة بـ UT1 من نموذج ΔT المعلن ولا يتم اختلاق UTC مدني."
++        )
+     return f"""<!doctype html><html dir='{direction}'><meta charset='utf-8'><title>{escape(title)}</title>
+ <style>body{{font-family:Arial,sans-serif;background:#0b1320;color:#e8eef8;padding:24px}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #4c5f78;padding:8px}}.card{{background:#111f31;padding:16px;margin:12px 0;border-radius:10px}}</style>
+ <h1>{escape(title)}</h1>
+@@ -44,7 +51,8 @@ def build_lunar_city_report_html(event, result, location, *, language: str = "ar
+ Global eclipse / الخسوف العالمي: <b>{escape(global_type)}</b><br>
+ Ephemeris: <b>JPL DE440</b><br>Shadow model: <b>{escape(event.shadow_model)}</b><br>
+ Umbral magnitude: {event.umbral_magnitude:.6f} • Penumbral magnitude: {event.penumbral_magnitude:.6f}<br>
+-Time scale shown for phase table: <b>UT1</b>; ΔT={event.delta_t_seconds:.3f} s.</div>
+-<table><thead><tr><th>Phase</th><th>Time</th><th>Moon altitude</th><th>Azimuth</th><th>Visibility</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
++Timezone / المنطقة الزمنية: <b>{escape(tz_name)}</b><br>
++Time scales: certified UTC when available • local time from IANA timezone • UT1 from IERS/ΔT; ΔT={event.delta_t_seconds:.3f} s.{unavailable}</div>
++<table><thead><tr><th>Phase</th><th>UTC</th><th>Local</th><th>UT1</th><th>Moon altitude</th><th>Azimuth</th><th>Visibility</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+ <div class='card'>{escape(result.horizon_model)}<br>{escape(result.note)}<br>Danjon 1.01 • DE440</div>
+ </html>"""

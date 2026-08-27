@@ -1,0 +1,140 @@
+diff --git a/tests/test_lunar_solver.py b/tests/test_lunar_solver.py
+index 724a64e..8bd249e 100644
+--- a/tests/test_lunar_solver.py
++++ b/tests/test_lunar_solver.py
+@@ -56,3 +56,16 @@ def test_2026_solver_prefers_iers_when_bundled_table_is_supplied():
+     assert event.greatest_utc_jd is not None
+     assert event.contacts_utc_jd['GREATEST'] is not None
+     assert 68.5 < event.delta_t_seconds < 70.0
++
++
++def test_greatest_is_minimum_linear_distance_to_shadow_axis(events_2026):
++    """Greatest eclipse is defined by closest approach to the umbral axis, not min angular gamma."""
++    eph = DE440Ephemeris(Path('data/de440.bsp'))
++    solver = LunarEclipseSolver(eph)
++    event = events_2026[0]
++    center = solver.geometry_at(event.greatest_tdb_jd).axis_distance_km
++    # A 1-second symmetric neighborhood is enough to expose an angular-gamma minimum.
++    before = solver.geometry_at(event.greatest_tdb_jd - 1.0/86400.0).axis_distance_km
++    after = solver.geometry_at(event.greatest_tdb_jd + 1.0/86400.0).axis_distance_km
++    assert center <= before + 1e-6
++    assert center <= after + 1e-6
+diff --git a/tests/test_lunar_time_scales.py b/tests/test_lunar_time_scales.py
+index 908bb0e..129a876 100644
+--- a/tests/test_lunar_time_scales.py
++++ b/tests/test_lunar_time_scales.py
+@@ -68,3 +68,72 @@ def test_historical_tt_to_ut1_never_invents_utc():
+     result = best_tt_to_earth_rotation(tt, 1600, 1, iers_table=None)
+     assert result.utc_jd is None
+     assert 'DeltaT model' in result.source
++
++
++def test_historical_calendar_reform_maps_same_jd_to_julian_and_gregorian_dates():
++    from lunar_core.time_scales import julian_to_jd, jd_to_calendar_components
++    reform = gregorian_to_jd(1582, 10, 15)
++    assert julian_to_jd(1582, 10, 5) == pytest.approx(reform, abs=1e-12)
++    assert jd_to_calendar_components(reform, calendar='gregorian')[:3] == (1582, 10, 15)
++    assert jd_to_calendar_components(reform, calendar='julian')[:3] == (1582, 10, 5)
++
++
++def test_pre_reform_historical_formatter_uses_julian_calendar_like_nasa_catalog():
++    from lunar_core.time_scales import historical_calendar_components, julian_to_jd
++    jd = julian_to_jd(1550, 3, 3, 3, 31, 35)
++    parts = historical_calendar_components(jd)
++    assert parts[:3] == (1550, 3, 3)
++    assert parts[-1] == 'Julian'
++
++
++def test_historical_year_start_uses_julian_before_reform_and_gregorian_after():
++    from lunar_core.time_scales import historical_year_start_jd, julian_to_jd
++    assert historical_year_start_jd(1550) == pytest.approx(julian_to_jd(1550, 1, 1))
++    assert historical_year_start_jd(1600) == pytest.approx(gregorian_to_jd(1600, 1, 1))
++
++
++def test_format_jd_label_marks_pre_reform_dates_as_julian():
++    from lunar_core.time_scales import format_jd_label, julian_to_jd
++    jd = julian_to_jd(1550, 3, 3, 3, 31, 35)
++    text = format_jd_label(jd, 'UT1')
++    assert text.startswith('1550-03-03 03:31:35')
++    assert 'UT1' in text
++    assert 'Julian' in text
++
++
++def test_format_jd_label_uses_gregorian_without_historical_ambiguity_after_reform():
++    from lunar_core.time_scales import format_jd_label, gregorian_to_jd
++    text = format_jd_label(gregorian_to_jd(2026, 3, 3, 11, 33, 43), 'UTC')
++    assert text.startswith('2026-03-03 11:33:43')
++    assert text.endswith('UTC')
++    assert 'Julian' not in text
++
++
++def test_local_time_text_converts_known_utc_with_iana_timezone():
++    from lunar_core.time_scales import gregorian_to_jd, local_time_text
++    utc = gregorian_to_jd(2026, 3, 3, 11, 33, 43)
++    text = local_time_text(utc, 'Asia/Baghdad')
++    assert text.startswith('2026-03-03 14:33:43')
++    assert 'Asia/Baghdad' in text
++    assert '+03:00' in text
++
++
++def test_local_time_text_never_invents_time_when_utc_or_timezone_is_unknown():
++    from lunar_core.time_scales import gregorian_to_jd, local_time_text
++    assert local_time_text(None, 'Asia/Baghdad') == '—'
++    assert local_time_text(gregorian_to_jd(2026, 3, 3), '', timezone_known=False) == '—'
++
++
++def test_bulletin_c72_certifies_37s_through_2027_june_before_next_possible_leap():
++    from lunar_core.time_scales import best_tt_to_earth_rotation, gregorian_to_jd, load_iers_dut1
++    table = load_iers_dut1(Path(__file__).resolve().parents[1] / 'data' / 'finals2000A.all')
++    feb_tt = gregorian_to_jd(2027, 2, 20, 23, 14, 6.0)
++    feb = best_tt_to_earth_rotation(feb_tt, 2027, 2, iers_table=table)
++    assert feb.utc_jd is not None
++    assert (feb_tt - feb.utc_jd) * 86400.0 == pytest.approx(69.184, abs=5e-5)
++
++    # A leap second could next be introduced at the end of 2027-06-30, so
++    # dates after that boundary remain deliberately uncertified until Bulletin C 73.
++    jul_tt = gregorian_to_jd(2027, 7, 18, 16, 4, 9.0)
++    jul = best_tt_to_earth_rotation(jul_tt, 2027, 7, iers_table=table)
++    assert jul.utc_jd is None
+diff --git a/tests/test_lunar_ui_contract.py b/tests/test_lunar_ui_contract.py
+index 8a52aea..c216b44 100644
+--- a/tests/test_lunar_ui_contract.py
++++ b/tests/test_lunar_ui_contract.py
+@@ -31,3 +31,15 @@ def test_lunar_ui_starts_without_a_computed_eclipse_result():
+     assert 'Visibility Footprint' in text
+     assert 'IERS EOP' in text
+     assert 'ΔT Model' in text
++
++
++def test_lunar_ui_local_table_exposes_local_time_and_historical_formatter():
++    text = (ROOT / 'lunar_main.py').read_text(encoding='utf-8')
++    assert '["Phase", "Local time", "Alt°", "Az°", "Visible"]' in text
++    assert 'local_time_text' in text
++    assert 'format_jd_label' in text
++
++
++def test_lunar_engine_cache_signature_was_bumped_after_greatest_algorithm_audit():
++    text = (ROOT / 'lunar_main.py').read_text(encoding='utf-8')
++    assert 'LUNAR-DE440-DANJON-IERS-R2' in text
+diff --git a/tests/test_lunar_visibility.py b/tests/test_lunar_visibility.py
+index 86072ab..0e2193f 100644
+--- a/tests/test_lunar_visibility.py
++++ b/tests/test_lunar_visibility.py
+@@ -47,3 +47,17 @@ def test_visibility_grid_keeps_antimeridian_endpoints_distinct_and_normalized(se
+     assert -180.0 in longs
+     assert 180.0 in longs
+     assert all(-180.0 <= p.longitude_deg <= 180.0 for p in points)
++
++
++def test_2026_greatest_moon_subpoint_agrees_with_nasa_rounded_zenith_location():
++    from lunar_core.topocentric import moon_geocentric_subpoint_deg
++    eph = DE440Ephemeris(Path('data/de440.bsp'))
++    solver = LunarEclipseSolver(eph)
++    event = solver.events_for_year(2026)[0]
++    lat, lon = moon_geocentric_subpoint_deg(
++        eph, event.greatest_tdb_jd, event.greatest_ut1_jd
++    )
++    assert lat == pytest.approx(6.0, abs=0.75)
++    # NASA lists 171 W; compare wrapped longitude.
++    dlon = ((lon - (-171.0) + 180.0) % 360.0) - 180.0
++    assert abs(dlon) < 0.75
